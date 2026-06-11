@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.1.0
+// @version      0.1.1
 // @description  在 momoyu.cc 热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -328,6 +328,19 @@
     return title || original.textContent || '';
   }
 
+  function getRankText(item) {
+    const original = item.querySelector(`:scope > .${ORIGINAL_CLASS}`) || item;
+    const rankElement = original.querySelector('a > span:first-child');
+    const rankText = rankElement?.textContent?.trim();
+
+    if (rankText && /^\d+\.$/.test(rankText)) {
+      return `${rankText} `;
+    }
+
+    const matchedRank = (original.textContent || '').trimStart().match(/^\d+\.\s*/);
+    return matchedRank?.[0] || '';
+  }
+
   function findMatchedKeyword(item) {
     const text = getMatchText(item).toLocaleLowerCase();
 
@@ -372,7 +385,7 @@
 
     item.classList.add(BLOCKED_CLASS);
     item.setAttribute(KEYWORD_ATTR, keyword);
-    placeholder.textContent = `包含${keyword}已屏蔽`;
+    placeholder.textContent = `${getRankText(item)}已屏蔽「${keyword}」`;
   }
 
   function revealItem(item) {
