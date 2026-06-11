@@ -8,3 +8,6 @@
 
 ## `zhihu-disable-search-kw.js`
 将知乎回答中的搜索关键字改回普通文本格式。
+
+## `momoyu-keyword-blocker.js`
+在 momoyu.cc 热榜列表中按关键词屏蔽条目，点击屏蔽占位文本可显示原内容，并支持关键词增加、删除、导入、导出。
