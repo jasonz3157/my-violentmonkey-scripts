@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.1.1
+// @version      0.2.0
 // @description  在 momoyu.cc 热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -11,6 +11,8 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @run-at       document-idle
 // @license      GPL-3.0
 // @downloadURL  https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/momoyu-keyword-blocker.js
@@ -21,6 +23,9 @@
   'use strict';
 
   const STORAGE_KEY = 'momoyu-keyword-blocker-keywords';
+  const UPDATED_AT_KEY = 'momoyu-keyword-blocker-updated-at';
+  const WEBDAV_CONFIG_KEY = 'momoyu-keyword-blocker-webdav-config';
+  const SYNC_FILE_NAME = 'keywords.json';
   const LIST_ITEM_SELECTOR = '.hot-content > li';
   const BLOCKED_CLASS = 'mmk-blocked';
   const REVEALED_ATTR = 'data-mmk-revealed';
@@ -29,9 +34,19 @@
   const PLACEHOLDER_CLASS = 'mmk-placeholder';
   const FLOATING_BUTTON_ID = 'mmk-floating-button';
   const MANAGER_ID = 'mmk-manager';
+  const DEFAULT_WEBDAV_CONFIG = {
+    enabled: false,
+    url: '',
+    directory: '',
+    username: '',
+    password: '',
+  };
 
   let keywords = loadKeywords();
   let scanTimer = 0;
+  let syncTimer = 0;
+  let isSyncing = false;
+  let hasPendingSync = false;
 
   GM_addStyle(`
     .${ORIGINAL_CLASS} {
@@ -137,8 +152,7 @@
       margin-bottom: 12px;
     }
 
-    .mmk-input,
-    .mmk-textarea {
+    .mmk-input {
       width: 100%;
       box-sizing: border-box;
       border: 1px solid #d8d8d8;
@@ -154,15 +168,7 @@
       padding: 0 10px;
     }
 
-    .mmk-textarea {
-      min-height: 108px;
-      padding: 8px 10px;
-      resize: vertical;
-      line-height: 1.5;
-    }
-
-    .mmk-input:focus,
-    .mmk-textarea:focus {
+    .mmk-input:focus {
       border-color: #777;
     }
 
@@ -251,6 +257,46 @@
       font-size: 13px;
       font-weight: 600;
     }
+
+    .mmk-settings {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .mmk-field {
+      display: grid;
+      gap: 4px;
+    }
+
+    .mmk-field-label {
+      color: #555;
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .mmk-check-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #333;
+      line-height: 20px;
+    }
+
+    .mmk-check-row input {
+      margin: 0;
+    }
+
+    .mmk-sync-status {
+      min-height: 18px;
+      color: #666;
+      font-size: 12px;
+      line-height: 18px;
+    }
+
+    .mmk-sync-status-error {
+      color: #c33;
+    }
   `);
 
   GM_registerMenuCommand('管理摸摸鱼屏蔽关键词', openManager);
@@ -274,11 +320,55 @@
     return [];
   }
 
-  function saveKeywords(nextKeywords) {
+  function saveKeywords(nextKeywords, options = {}) {
+    const { sync = true, touch = true } = options;
+
     keywords = normalizeKeywords(nextKeywords);
     GM_setValue(STORAGE_KEY, keywords);
+
+    if (touch) {
+      setLocalUpdatedAt(Date.now());
+    }
+
     refreshBlockedItems(true);
     renderManagerKeywords();
+
+    if (sync) {
+      scheduleWebdavSync();
+    }
+  }
+
+  function getLocalUpdatedAt() {
+    const value = Number(GM_getValue(UPDATED_AT_KEY, 0));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  function setLocalUpdatedAt(updatedAt) {
+    GM_setValue(UPDATED_AT_KEY, updatedAt);
+  }
+
+  function loadWebdavConfig() {
+    const saved = GM_getValue(WEBDAV_CONFIG_KEY, {});
+    const config = saved && typeof saved === 'object' ? saved : {};
+
+    return {
+      ...DEFAULT_WEBDAV_CONFIG,
+      enabled: Boolean(config.enabled),
+      url: String(config.url || DEFAULT_WEBDAV_CONFIG.url).trim(),
+      directory: String(config.directory || DEFAULT_WEBDAV_CONFIG.directory).trim(),
+      username: String(config.username || DEFAULT_WEBDAV_CONFIG.username),
+      password: String(config.password || DEFAULT_WEBDAV_CONFIG.password),
+    };
+  }
+
+  function saveWebdavConfig(config) {
+    GM_setValue(WEBDAV_CONFIG_KEY, {
+      enabled: Boolean(config.enabled),
+      url: String(config.url || '').trim(),
+      directory: String(config.directory || '').trim(),
+      username: String(config.username || ''),
+      password: String(config.password || ''),
+    });
   }
 
   function normalizeKeywords(values) {
@@ -318,6 +408,278 @@
     }
 
     return value.split(/[\n,，;；\t]+/);
+  }
+
+  function parseWebdavPayload(text) {
+    const value = String(text || '').trim();
+
+    if (!value) {
+      return {
+        keywords: [],
+        updatedAt: 0,
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(value);
+
+      if (Array.isArray(parsed)) {
+        return {
+          keywords: normalizeKeywords(parsed),
+          updatedAt: 0,
+        };
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        const parsedKeywords = Array.isArray(parsed.keywords) ? parsed.keywords : parseKeywordText(parsed.keywords);
+
+        return {
+          keywords: normalizeKeywords(parsedKeywords),
+          updatedAt: Number(parsed.updatedAt) || 0,
+        };
+      }
+    } catch {
+      return {
+        keywords: normalizeKeywords(parseKeywordText(value)),
+        updatedAt: 0,
+      };
+    }
+
+    return {
+      keywords: [],
+      updatedAt: 0,
+    };
+  }
+
+  function areKeywordsEqual(left, right) {
+    if (left.length !== right.length) {
+      return false;
+    }
+
+    return left.every((keyword, index) => keyword === right[index]);
+  }
+
+  function createBasicAuth(username, password) {
+    const bytes = new TextEncoder().encode(`${username}:${password}`);
+    let binary = '';
+
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+
+    return `Basic ${window.btoa(binary)}`;
+  }
+
+  function getWebdavFileUrl(config) {
+    const baseUrl = config.url.replace(/\/+$/, '');
+    const directory = config.directory.replace(/^\/+|\/+$/g, '');
+
+    return `${baseUrl}/${directory ? `${directory}/` : ''}${SYNC_FILE_NAME}`;
+  }
+
+  function getWebdavDirectoryUrls(config) {
+    const directory = config.directory.replace(/^\/+|\/+$/g, '');
+
+    if (!directory) {
+      return [];
+    }
+
+    const urls = [];
+    let currentUrl = config.url.replace(/\/+$/, '');
+
+    for (const segment of directory.split('/').filter(Boolean)) {
+      currentUrl = `${currentUrl}/${segment}`;
+      urls.push(currentUrl);
+    }
+
+    return urls;
+  }
+
+  function requestWebdav(method, url, config, data = null) {
+    return new Promise((resolve, reject) => {
+      if (typeof GM_xmlhttpRequest !== 'function') {
+        reject(new Error('当前脚本环境不支持 GM_xmlhttpRequest'));
+        return;
+      }
+
+      const headers = {};
+
+      if (config.username || config.password) {
+        headers.Authorization = createBasicAuth(config.username, config.password);
+      }
+
+      if (data !== null) {
+        headers['Content-Type'] = 'application/json; charset=UTF-8';
+      }
+
+      GM_xmlhttpRequest({
+        method,
+        url,
+        headers,
+        data,
+        timeout: 15000,
+        onload: resolve,
+        onerror: () => reject(new Error('WebDAV 请求失败')),
+        ontimeout: () => reject(new Error('WebDAV 请求超时')),
+      });
+    });
+  }
+
+  async function ensureWebdavDirectory(config) {
+    for (const url of getWebdavDirectoryUrls(config)) {
+      const response = await requestWebdav('MKCOL', url, config);
+
+      if (![200, 201, 405].includes(response.status)) {
+        throw new Error(`创建 WebDAV 目录失败：HTTP ${response.status}`);
+      }
+    }
+  }
+
+  async function uploadWebdavKeywords(config, updatedAt = getLocalUpdatedAt()) {
+    const nextUpdatedAt = updatedAt || Date.now();
+    const payload = JSON.stringify(
+      {
+        version: 1,
+        updatedAt: nextUpdatedAt,
+        keywords,
+      },
+      null,
+      2,
+    );
+
+    await ensureWebdavDirectory(config);
+
+    const response = await requestWebdav('PUT', getWebdavFileUrl(config), config, payload);
+
+    if (![200, 201, 204].includes(response.status)) {
+      throw new Error(`上传 WebDAV 关键词失败：HTTP ${response.status}`);
+    }
+
+    setLocalUpdatedAt(nextUpdatedAt);
+  }
+
+  function setSyncStatus(text, isError = false) {
+    const status = document.querySelector('#mmk-sync-status');
+
+    if (!status) {
+      return;
+    }
+
+    status.textContent = text;
+    status.classList.toggle('mmk-sync-status-error', isError);
+  }
+
+  function scheduleWebdavSync() {
+    window.clearTimeout(syncTimer);
+    syncTimer = window.setTimeout(() => {
+      syncTimer = 0;
+      syncWebdavKeywords('change');
+    }, 400);
+  }
+
+  async function syncWebdavKeywords(source = 'auto') {
+    const config = loadWebdavConfig();
+
+    if (!config.enabled) {
+      setSyncStatus('未启用同步');
+      return;
+    }
+
+    if (!config.url) {
+      setSyncStatus('请先填写 WebDAV 地址', true);
+      return;
+    }
+
+    if (isSyncing) {
+      hasPendingSync = true;
+      return;
+    }
+
+    isSyncing = true;
+    setSyncStatus(source === 'manual' ? '正在同步...' : '正在自动同步...');
+
+    try {
+      const fileUrl = getWebdavFileUrl(config);
+      const response = await requestWebdav('GET', fileUrl, config);
+      const localUpdatedAt = getLocalUpdatedAt();
+      const hasLocalUpdatedAt = localUpdatedAt > 0;
+
+      if (response.status === 404) {
+        const nextUpdatedAt = localUpdatedAt || Date.now();
+        setLocalUpdatedAt(nextUpdatedAt);
+        await uploadWebdavKeywords(config, nextUpdatedAt);
+        setSyncStatus('已创建远端同步文件');
+        return;
+      }
+
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`读取 WebDAV 关键词失败：HTTP ${response.status}`);
+      }
+
+      const remote = parseWebdavPayload(response.responseText);
+      const remoteKeywords = remote.keywords;
+      const remoteUpdatedAt = remote.updatedAt;
+
+      if (!hasLocalUpdatedAt) {
+        if (keywords.length > 0 && remoteKeywords.length > 0) {
+          const mergedKeywords = normalizeKeywords([...remoteKeywords, ...keywords]);
+          const nextUpdatedAt = Date.now();
+          saveKeywords(mergedKeywords, { sync: false, touch: false });
+          setLocalUpdatedAt(nextUpdatedAt);
+          await uploadWebdavKeywords(config, nextUpdatedAt);
+          setSyncStatus('已合并本地和远端关键词');
+          return;
+        }
+
+        if (keywords.length > 0) {
+          const nextUpdatedAt = Date.now();
+          setLocalUpdatedAt(nextUpdatedAt);
+          await uploadWebdavKeywords(config, nextUpdatedAt);
+          setSyncStatus('已上传本地关键词');
+          return;
+        }
+
+        saveKeywords(remoteKeywords, { sync: false, touch: false });
+        setLocalUpdatedAt(remoteUpdatedAt || Date.now());
+        setSyncStatus('已拉取远端关键词');
+        return;
+      }
+
+      if (remoteUpdatedAt > localUpdatedAt) {
+        saveKeywords(remoteKeywords, { sync: false, touch: false });
+        setLocalUpdatedAt(remoteUpdatedAt);
+        setSyncStatus('已拉取远端关键词');
+        return;
+      }
+
+      if (remoteUpdatedAt < localUpdatedAt) {
+        await uploadWebdavKeywords(config, localUpdatedAt);
+        setSyncStatus('已上传本地关键词');
+        return;
+      }
+
+      if (!areKeywordsEqual(remoteKeywords, keywords)) {
+        const mergedKeywords = normalizeKeywords([...remoteKeywords, ...keywords]);
+        const nextUpdatedAt = Date.now();
+        saveKeywords(mergedKeywords, { sync: false, touch: false });
+        setLocalUpdatedAt(nextUpdatedAt);
+        await uploadWebdavKeywords(config, nextUpdatedAt);
+        setSyncStatus('已合并同步差异');
+        return;
+      }
+
+      setSyncStatus('关键词已同步');
+    } catch (error) {
+      console.warn('[momoyu-keyword-blocker] WebDAV 同步失败', error);
+      setSyncStatus(error.message || 'WebDAV 同步失败', true);
+    } finally {
+      isSyncing = false;
+
+      if (hasPendingSync) {
+        hasPendingSync = false;
+        scheduleWebdavSync();
+      }
+    }
   }
 
   function getMatchText(item) {
@@ -500,6 +862,18 @@
     return button;
   }
 
+  function createInputField(labelText, input) {
+    const field = document.createElement('label');
+    field.className = 'mmk-field';
+
+    const label = document.createElement('span');
+    label.className = 'mmk-field-label';
+    label.textContent = labelText;
+
+    field.append(label, input);
+    return field;
+  }
+
   function renderManagerKeywords() {
     const list = document.querySelector('#mmk-keyword-list');
 
@@ -603,35 +977,123 @@
     importTitle.className = 'mmk-section-title';
     importTitle.textContent = '导入 / 导出';
 
-    const textarea = document.createElement('textarea');
-    textarea.className = 'mmk-textarea';
-    textarea.value = keywords.join('\n');
-    textarea.placeholder = '每行一个关键词，也支持用逗号、分号分隔';
-
     const actionRow = document.createElement('div');
     actionRow.className = 'mmk-row';
 
     const importButton = createButton('导入覆盖', 'mmk-btn-primary');
     importButton.addEventListener('click', () => {
-      saveKeywords(parseKeywordText(textarea.value));
-      textarea.value = keywords.join('\n');
+      const importText = window.prompt('粘贴关键词内容，每行一个，也支持用逗号、分号分隔。', keywords.join('\n'));
+
+      if (importText === null) {
+        return;
+      }
+
+      saveKeywords(parseKeywordText(importText));
     });
 
     const copyButton = createButton('复制导出');
     copyButton.addEventListener('click', () => {
       const exportText = keywords.join('\n');
-      textarea.value = exportText;
 
       if (typeof GM_setClipboard === 'function') {
         GM_setClipboard(exportText, 'text');
       } else {
-        textarea.select();
+        const copyArea = document.createElement('textarea');
+        copyArea.value = exportText;
+        copyArea.style.position = 'fixed';
+        copyArea.style.left = '-9999px';
+        document.body.appendChild(copyArea);
+        copyArea.select();
         document.execCommand('copy');
+        copyArea.remove();
       }
     });
 
     actionRow.append(importButton, copyButton);
-    body.append(addRow, list, importTitle, textarea, actionRow);
+
+    const webdavConfig = loadWebdavConfig();
+
+    const syncTitle = document.createElement('div');
+    syncTitle.className = 'mmk-section-title';
+    syncTitle.textContent = 'WebDAV 同步';
+
+    const settings = document.createElement('div');
+    settings.className = 'mmk-settings';
+
+    const enabledLabel = document.createElement('label');
+    enabledLabel.className = 'mmk-check-row';
+
+    const enabledInput = document.createElement('input');
+    enabledInput.type = 'checkbox';
+    enabledInput.checked = webdavConfig.enabled;
+
+    const enabledText = document.createElement('span');
+    enabledText.textContent = '启用 WebDAV 同步';
+    enabledLabel.append(enabledInput, enabledText);
+
+    const urlInput = document.createElement('input');
+    urlInput.className = 'mmk-input';
+    urlInput.type = 'url';
+    urlInput.placeholder = 'https://example.com/webdav';
+    urlInput.value = webdavConfig.url;
+
+    const directoryInput = document.createElement('input');
+    directoryInput.className = 'mmk-input';
+    directoryInput.type = 'text';
+    directoryInput.placeholder = 'momoyu';
+    directoryInput.value = webdavConfig.directory;
+
+    const usernameInput = document.createElement('input');
+    usernameInput.className = 'mmk-input';
+    usernameInput.type = 'text';
+    usernameInput.autocomplete = 'username';
+    usernameInput.value = webdavConfig.username;
+
+    const passwordInput = document.createElement('input');
+    passwordInput.className = 'mmk-input';
+    passwordInput.type = 'password';
+    passwordInput.autocomplete = 'current-password';
+    passwordInput.value = webdavConfig.password;
+
+    settings.append(
+      enabledLabel,
+      createInputField('WebDAV 地址', urlInput),
+      createInputField('目录', directoryInput),
+      createInputField('用户名', usernameInput),
+      createInputField('密码', passwordInput),
+    );
+
+    const syncActionRow = document.createElement('div');
+    syncActionRow.className = 'mmk-row';
+
+    const getCurrentWebdavConfig = () => ({
+      enabled: enabledInput.checked,
+      url: urlInput.value,
+      directory: directoryInput.value,
+      username: usernameInput.value,
+      password: passwordInput.value,
+    });
+
+    const saveSyncButton = createButton('保存设置', 'mmk-btn-primary');
+    saveSyncButton.addEventListener('click', () => {
+      saveWebdavConfig(getCurrentWebdavConfig());
+      setSyncStatus('同步设置已保存');
+    });
+
+    const syncNowButton = createButton('立即同步');
+    syncNowButton.addEventListener('click', () => {
+      saveWebdavConfig(getCurrentWebdavConfig());
+      syncWebdavKeywords('manual');
+    });
+
+    syncActionRow.append(saveSyncButton, syncNowButton);
+
+    const syncStatus = document.createElement('div');
+    syncStatus.id = 'mmk-sync-status';
+    syncStatus.className = 'mmk-sync-status';
+    syncStatus.textContent = webdavConfig.enabled ? '等待同步' : '未启用同步';
+
+    body.append(addRow, list, importTitle, actionRow, syncTitle, settings, syncActionRow, syncStatus);
 
     const footer = document.createElement('div');
     footer.className = 'mmk-panel-footer';
@@ -640,7 +1102,6 @@
     clearButton.addEventListener('click', () => {
       if (window.confirm('确定清空全部屏蔽关键词吗？')) {
         saveKeywords([]);
-        textarea.value = '';
       }
     });
 
@@ -679,6 +1140,7 @@
     addFloatingButton();
     scan();
     observeListChanges();
+    syncWebdavKeywords('startup');
   }
 
   if (document.readyState === 'loading') {
