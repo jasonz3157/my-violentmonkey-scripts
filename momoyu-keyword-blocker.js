@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.0
+// @version      0.2.2
 // @description  在 momoyu.cc 热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -234,6 +234,15 @@
       white-space: nowrap;
     }
 
+    .mmk-list-action {
+      margin-left: auto;
+    }
+
+    .mmk-list-action .mmk-btn {
+      height: 28px;
+      padding: 0 10px;
+    }
+
     .mmk-delete {
       width: 20px;
       height: 20px;
@@ -283,8 +292,16 @@
       line-height: 20px;
     }
 
-    .mmk-check-row input {
+    .mmk-check-row .mmk-checkbox {
+      position: static !important;
+      display: inline-block !important;
+      flex: 0 0 auto;
+      width: 16px !important;
+      height: 16px !important;
       margin: 0;
+      opacity: 1 !important;
+      appearance: auto !important;
+      -webkit-appearance: checkbox !important;
     }
 
     .mmk-sync-status {
@@ -911,6 +928,19 @@
       item.append(text, deleteButton);
       list.appendChild(item);
     }
+
+    const actionItem = document.createElement('li');
+    actionItem.className = 'mmk-list-action';
+
+    const clearButton = createButton('清空');
+    clearButton.addEventListener('click', () => {
+      if (window.confirm('确定清空全部屏蔽关键词吗？')) {
+        saveKeywords([]);
+      }
+    });
+
+    actionItem.appendChild(clearButton);
+    list.appendChild(actionItem);
   }
 
   function closeManager() {
@@ -1025,6 +1055,7 @@
 
     const enabledInput = document.createElement('input');
     enabledInput.type = 'checkbox';
+    enabledInput.className = 'mmk-checkbox';
     enabledInput.checked = webdavConfig.enabled;
 
     const enabledText = document.createElement('span');
@@ -1074,19 +1105,13 @@
       password: passwordInput.value,
     });
 
-    const saveSyncButton = createButton('保存设置', 'mmk-btn-primary');
-    saveSyncButton.addEventListener('click', () => {
-      saveWebdavConfig(getCurrentWebdavConfig());
-      setSyncStatus('同步设置已保存');
-    });
-
-    const syncNowButton = createButton('立即同步');
+    const syncNowButton = createButton('立即同步', 'mmk-btn-primary');
     syncNowButton.addEventListener('click', () => {
       saveWebdavConfig(getCurrentWebdavConfig());
       syncWebdavKeywords('manual');
     });
 
-    syncActionRow.append(saveSyncButton, syncNowButton);
+    syncActionRow.append(syncNowButton);
 
     const syncStatus = document.createElement('div');
     syncStatus.id = 'mmk-sync-status';
@@ -1098,16 +1123,9 @@
     const footer = document.createElement('div');
     footer.className = 'mmk-panel-footer';
 
-    const clearButton = createButton('清空');
-    clearButton.addEventListener('click', () => {
-      if (window.confirm('确定清空全部屏蔽关键词吗？')) {
-        saveKeywords([]);
-      }
-    });
-
     const doneButton = createButton('完成', 'mmk-btn-primary');
     doneButton.addEventListener('click', closeManager);
-    footer.append(clearButton, doneButton);
+    footer.append(doneButton);
 
     panel.append(header, body, footer);
     overlay.appendChild(panel);
