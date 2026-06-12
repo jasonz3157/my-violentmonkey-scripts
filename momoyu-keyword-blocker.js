@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.2
+// @version      0.2.3
 // @description  在 momoyu.cc 热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
-// @icon         https://momoyu.cc/favicon.ico
+// @icon         https://momoyu.cc/favicon32.ico
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
