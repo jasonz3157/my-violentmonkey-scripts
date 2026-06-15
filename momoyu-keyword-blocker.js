@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.3
+// @version      0.2.4
 // @description  在 momoyu.cc 热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -35,9 +35,8 @@
   const FLOATING_BUTTON_ID = 'mmk-floating-button';
   const MANAGER_ID = 'mmk-manager';
   const DEFAULT_WEBDAV_CONFIG = {
-    enabled: false,
     url: '',
-    directory: '',
+    directory: 'momoyu/',
     username: '',
     password: '',
   };
@@ -284,26 +283,6 @@
       line-height: 18px;
     }
 
-    .mmk-check-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: #333;
-      line-height: 20px;
-    }
-
-    .mmk-check-row .mmk-checkbox {
-      position: static !important;
-      display: inline-block !important;
-      flex: 0 0 auto;
-      width: 16px !important;
-      height: 16px !important;
-      margin: 0;
-      opacity: 1 !important;
-      appearance: auto !important;
-      -webkit-appearance: checkbox !important;
-    }
-
     .mmk-sync-status {
       min-height: 18px;
       color: #666;
@@ -370,7 +349,6 @@
 
     return {
       ...DEFAULT_WEBDAV_CONFIG,
-      enabled: Boolean(config.enabled),
       url: String(config.url || DEFAULT_WEBDAV_CONFIG.url).trim(),
       directory: String(config.directory || DEFAULT_WEBDAV_CONFIG.directory).trim(),
       username: String(config.username || DEFAULT_WEBDAV_CONFIG.username),
@@ -380,12 +358,15 @@
 
   function saveWebdavConfig(config) {
     GM_setValue(WEBDAV_CONFIG_KEY, {
-      enabled: Boolean(config.enabled),
       url: String(config.url || '').trim(),
-      directory: String(config.directory || '').trim(),
+      directory: String(config.directory || DEFAULT_WEBDAV_CONFIG.directory).trim(),
       username: String(config.username || ''),
       password: String(config.password || ''),
     });
+  }
+
+  function isWebdavConfigured(config) {
+    return Boolean(config.url);
   }
 
   function normalizeKeywords(values) {
@@ -552,13 +533,13 @@
     }
   }
 
-  async function uploadWebdavKeywords(config, updatedAt = getLocalUpdatedAt()) {
+  async function writeWebdavKeywords(config, nextKeywords, updatedAt = Date.now(), updateLocalTimestamp = true) {
     const nextUpdatedAt = updatedAt || Date.now();
     const payload = JSON.stringify(
       {
         version: 1,
         updatedAt: nextUpdatedAt,
-        keywords,
+        keywords: normalizeKeywords(nextKeywords),
       },
       null,
       2,
@@ -572,7 +553,13 @@
       throw new Error(`上传 WebDAV 关键词失败：HTTP ${response.status}`);
     }
 
-    setLocalUpdatedAt(nextUpdatedAt);
+    if (updateLocalTimestamp) {
+      setLocalUpdatedAt(nextUpdatedAt);
+    }
+  }
+
+  async function uploadWebdavKeywords(config, updatedAt = getLocalUpdatedAt()) {
+    await writeWebdavKeywords(config, keywords, updatedAt);
   }
 
   function setSyncStatus(text, isError = false) {
@@ -597,13 +584,8 @@
   async function syncWebdavKeywords(source = 'auto') {
     const config = loadWebdavConfig();
 
-    if (!config.enabled) {
+    if (!isWebdavConfigured(config)) {
       setSyncStatus('未启用同步');
-      return;
-    }
-
-    if (!config.url) {
-      setSyncStatus('请先填写 WebDAV 地址', true);
       return;
     }
 
@@ -619,7 +601,6 @@
       const fileUrl = getWebdavFileUrl(config);
       const response = await requestWebdav('GET', fileUrl, config);
       const localUpdatedAt = getLocalUpdatedAt();
-      const hasLocalUpdatedAt = localUpdatedAt > 0;
 
       if (response.status === 404) {
         const nextUpdatedAt = localUpdatedAt || Date.now();
@@ -635,53 +616,14 @@
 
       const remote = parseWebdavPayload(response.responseText);
       const remoteKeywords = remote.keywords;
-      const remoteUpdatedAt = remote.updatedAt;
+      const mergedKeywords = normalizeKeywords([...remoteKeywords, ...keywords]);
 
-      if (!hasLocalUpdatedAt) {
-        if (keywords.length > 0 && remoteKeywords.length > 0) {
-          const mergedKeywords = normalizeKeywords([...remoteKeywords, ...keywords]);
-          const nextUpdatedAt = Date.now();
-          saveKeywords(mergedKeywords, { sync: false, touch: false });
-          setLocalUpdatedAt(nextUpdatedAt);
-          await uploadWebdavKeywords(config, nextUpdatedAt);
-          setSyncStatus('已合并本地和远端关键词');
-          return;
-        }
-
-        if (keywords.length > 0) {
-          const nextUpdatedAt = Date.now();
-          setLocalUpdatedAt(nextUpdatedAt);
-          await uploadWebdavKeywords(config, nextUpdatedAt);
-          setSyncStatus('已上传本地关键词');
-          return;
-        }
-
-        saveKeywords(remoteKeywords, { sync: false, touch: false });
-        setLocalUpdatedAt(remoteUpdatedAt || Date.now());
-        setSyncStatus('已拉取远端关键词');
-        return;
-      }
-
-      if (remoteUpdatedAt > localUpdatedAt) {
-        saveKeywords(remoteKeywords, { sync: false, touch: false });
-        setLocalUpdatedAt(remoteUpdatedAt);
-        setSyncStatus('已拉取远端关键词');
-        return;
-      }
-
-      if (remoteUpdatedAt < localUpdatedAt) {
-        await uploadWebdavKeywords(config, localUpdatedAt);
-        setSyncStatus('已上传本地关键词');
-        return;
-      }
-
-      if (!areKeywordsEqual(remoteKeywords, keywords)) {
-        const mergedKeywords = normalizeKeywords([...remoteKeywords, ...keywords]);
+      if (!areKeywordsEqual(mergedKeywords, keywords) || !areKeywordsEqual(mergedKeywords, remoteKeywords)) {
         const nextUpdatedAt = Date.now();
         saveKeywords(mergedKeywords, { sync: false, touch: false });
         setLocalUpdatedAt(nextUpdatedAt);
         await uploadWebdavKeywords(config, nextUpdatedAt);
-        setSyncStatus('已合并同步差异');
+        setSyncStatus('已合并本地和远端关键词');
         return;
       }
 
@@ -1050,18 +992,6 @@
     const settings = document.createElement('div');
     settings.className = 'mmk-settings';
 
-    const enabledLabel = document.createElement('label');
-    enabledLabel.className = 'mmk-check-row';
-
-    const enabledInput = document.createElement('input');
-    enabledInput.type = 'checkbox';
-    enabledInput.className = 'mmk-checkbox';
-    enabledInput.checked = webdavConfig.enabled;
-
-    const enabledText = document.createElement('span');
-    enabledText.textContent = '启用 WebDAV 同步';
-    enabledLabel.append(enabledInput, enabledText);
-
     const urlInput = document.createElement('input');
     urlInput.className = 'mmk-input';
     urlInput.type = 'url';
@@ -1071,7 +1001,7 @@
     const directoryInput = document.createElement('input');
     directoryInput.className = 'mmk-input';
     directoryInput.type = 'text';
-    directoryInput.placeholder = 'momoyu';
+    directoryInput.placeholder = DEFAULT_WEBDAV_CONFIG.directory;
     directoryInput.value = webdavConfig.directory;
 
     const usernameInput = document.createElement('input');
@@ -1087,7 +1017,6 @@
     passwordInput.value = webdavConfig.password;
 
     settings.append(
-      enabledLabel,
       createInputField('WebDAV 地址', urlInput),
       createInputField('目录', directoryInput),
       createInputField('用户名', usernameInput),
@@ -1098,7 +1027,6 @@
     syncActionRow.className = 'mmk-row';
 
     const getCurrentWebdavConfig = () => ({
-      enabled: enabledInput.checked,
       url: urlInput.value,
       directory: directoryInput.value,
       username: usernameInput.value,
@@ -1111,12 +1039,37 @@
       syncWebdavKeywords('manual');
     });
 
-    syncActionRow.append(syncNowButton);
+    const clearWebdavButton = createButton('清空 WebDAV');
+    clearWebdavButton.addEventListener('click', async () => {
+      if (!window.confirm('确定清空 WebDAV 中的关键词吗？本地关键词不会被清空。')) {
+        return;
+      }
+
+      const config = getCurrentWebdavConfig();
+      saveWebdavConfig(config);
+      const savedConfig = loadWebdavConfig();
+
+      if (!isWebdavConfigured(savedConfig)) {
+        setSyncStatus('请先填写 WebDAV 地址', true);
+        return;
+      }
+
+      try {
+        setSyncStatus('正在清空 WebDAV...');
+        await writeWebdavKeywords(savedConfig, [], Date.now(), false);
+        setSyncStatus('已清空 WebDAV 关键词');
+      } catch (error) {
+        console.warn('[momoyu-keyword-blocker] 清空 WebDAV 关键词失败', error);
+        setSyncStatus(error.message || '清空 WebDAV 关键词失败', true);
+      }
+    });
+
+    syncActionRow.append(syncNowButton, clearWebdavButton);
 
     const syncStatus = document.createElement('div');
     syncStatus.id = 'mmk-sync-status';
     syncStatus.className = 'mmk-sync-status';
-    syncStatus.textContent = webdavConfig.enabled ? '等待同步' : '未启用同步';
+    syncStatus.textContent = isWebdavConfigured(webdavConfig) ? '等待同步' : '未启用同步';
 
     body.append(addRow, list, importTitle, actionRow, syncTitle, settings, syncActionRow, syncStatus);
 
