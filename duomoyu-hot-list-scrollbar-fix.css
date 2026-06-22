@@ -1,0 +1,39 @@
+/*
+ * 修复 duomoyu.com/hot-list 热榜卡片 hover 时滚动条出现导致的排版抖动。
+ *
+ * 站点原样式默认隐藏滚动条，hover 时再把滚动条宽度改为 8px。
+ * 这里改为始终保留滚动条槽位，非 hover 时仅隐藏颜色。
+ */
+.hot-list-card .ant-card-body {
+  scrollbar-gutter: stable !important;
+  scrollbar-width: thin !important;
+  scrollbar-color: transparent transparent !important;
+}
+
+.hot-list-card .ant-card-body::-webkit-scrollbar {
+  width: 8px !important;
+}
+
+.hot-list-card .ant-card-body::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.hot-list-card .ant-card-body::-webkit-scrollbar-thumb {
+  border-radius: 999px !important;
+  background-color: transparent !important;
+}
+
+.hot-list-card .ant-card-body:hover {
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--scroll-bar-color) transparent !important;
+}
+
+.hot-list-card .ant-card-body:hover::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-bar-color) !important;
+}
+
+@media all and (max-width: 600px) {
+  .hot-list-card .ant-card-body {
+    scrollbar-gutter: auto !important;
+  }
+}

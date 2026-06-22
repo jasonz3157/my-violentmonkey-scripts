@@ -12,5 +12,5 @@
 ## `momoyu-keyword-blocker.js`
 在 momoyu.cc 热榜列表中按关键词屏蔽条目，点击屏蔽占位文本可显示原内容，并支持关键词增加、删除、导入、导出。
 
-## `volc-vke-node-label-column.js`
-在火山 VKE 节点列表中增加 `Node标签值` 列，展示节点详情中 `Name=node` 的标签值。
+## `duomoyu-hot-list-scrollbar-fix.css`
+修复 duomoyu.com 热榜卡片 hover 时因滚动条出现导致的排版抖动。

@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.4
-// @description  在 momoyu.cc 热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
+// @version      0.2.5
+// @description  在摸摸鱼、多摸鱼热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
+// @match        https://duomoyu.com/hot-list*
 // @icon         https://momoyu.cc/favicon32.ico
 // @grant        GM_addStyle
 // @grant        GM_getValue
@@ -26,7 +27,7 @@
   const UPDATED_AT_KEY = 'momoyu-keyword-blocker-updated-at';
   const WEBDAV_CONFIG_KEY = 'momoyu-keyword-blocker-webdav-config';
   const SYNC_FILE_NAME = 'keywords.json';
-  const LIST_ITEM_SELECTOR = '.hot-content > li';
+  const LIST_ITEM_SELECTOR = '.hot-content > li, ul.news-list > li.news';
   const BLOCKED_CLASS = 'mmk-blocked';
   const REVEALED_ATTR = 'data-mmk-revealed';
   const KEYWORD_ATTR = 'data-mmk-keyword';
