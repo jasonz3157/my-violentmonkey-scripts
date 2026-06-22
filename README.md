@@ -14,3 +14,6 @@
 
 ## `duomoyu-hot-list-scrollbar-fix.css`
 修复 duomoyu.com 热榜卡片 hover 时因滚动条出现导致的排版抖动。
+
+## `grafana-variable-textbox-fix.css`
+修复 grafana dashboard Variables 中 textbox 变量左侧圆角与变量名不协调的问题。

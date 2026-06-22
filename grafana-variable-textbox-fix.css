@@ -1,0 +1,12 @@
+/*
+ * 修复 grafana dashboard Variables 中 textbox 变量的圆角不协调问题。
+ *
+ * Grafana 当前页面中，textbox 变量的 label 已经是左圆右直；
+ * 但后面的 input 仍然保留左侧圆角。这里仅去掉 input 左侧圆角，
+ * 让它和其他下拉变量一样显示为连续的一组控件。
+ */
+
+body.page-dashboard main label + [class*='input-wrapper'] input[placeholder='Enter value'] {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
