@@ -2,3 +2,4 @@ logs
 *.log
 .codex
 volc-*.js
+uptime-kuma-cert-expiry-summary.js
