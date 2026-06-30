@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.5
-// @description  在摸摸鱼、多摸鱼热榜列表中按关键词屏蔽条目，并支持关键词导入导出。
+// @version      0.2.6
+// @description  在摸摸鱼、多摸鱼热榜、LINUX DO 中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
 // @match        https://duomoyu.com/hot-list*
+// @match        https://linux.do/*
 // @icon         https://momoyu.cc/favicon32.ico
 // @grant        GM_addStyle
 // @grant        GM_getValue
@@ -27,8 +28,20 @@
   const UPDATED_AT_KEY = 'momoyu-keyword-blocker-updated-at';
   const WEBDAV_CONFIG_KEY = 'momoyu-keyword-blocker-webdav-config';
   const SYNC_FILE_NAME = 'keywords.json';
-  const LIST_ITEM_SELECTOR = '.hot-content > li, ul.news-list > li.news';
+  const DEFAULT_SITE_CONFIG = {
+    itemSelector: '.hot-content > li, ul.news-list > li.news',
+    titleSelector: 'a[title]',
+  };
+  const SITE_CONFIGS = [
+    {
+      hosts: ['linux.do'],
+      itemSelector: 'tr.topic-list-item, .topic-list-item, .latest-topic-list-item',
+      titleSelector: 'a.title.raw-link.raw-topic-link, a.raw-topic-link, a.topic-title',
+    },
+  ];
   const BLOCKED_CLASS = 'mmk-blocked';
+  const TABLE_HIDDEN_CLASS = 'mmk-table-hidden';
+  const TABLE_PLACEHOLDER_CLASS = 'mmk-table-placeholder-row';
   const REVEALED_ATTR = 'data-mmk-revealed';
   const KEYWORD_ATTR = 'data-mmk-keyword';
   const ORIGINAL_CLASS = 'mmk-original';
@@ -43,6 +56,7 @@
   };
 
   let keywords = loadKeywords();
+  const siteConfig = getSiteConfig();
   let scanTimer = 0;
   let syncTimer = 0;
   let isSyncing = false;
@@ -69,6 +83,20 @@
     .${PLACEHOLDER_CLASS}:hover {
       color: #d33;
       text-decoration: underline;
+    }
+
+    .${TABLE_HIDDEN_CLASS} {
+      display: none !important;
+    }
+
+    .${TABLE_PLACEHOLDER_CLASS} > td {
+      padding: 0 !important;
+    }
+
+    .${TABLE_PLACEHOLDER_CLASS} .${PLACEHOLDER_CLASS} {
+      padding: 11px 10px;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+      box-sizing: border-box;
     }
 
     #${FLOATING_BUTTON_ID} {
@@ -297,6 +325,12 @@
   `);
 
   GM_registerMenuCommand('管理摸摸鱼屏蔽关键词', openManager);
+
+  function getSiteConfig() {
+    const host = window.location.hostname;
+
+    return SITE_CONFIGS.find((config) => config.hosts.includes(host)) || DEFAULT_SITE_CONFIG;
+  }
 
   function loadKeywords() {
     const saved = GM_getValue(STORAGE_KEY, []);
@@ -644,10 +678,10 @@
 
   function getMatchText(item) {
     const original = item.querySelector(`:scope > .${ORIGINAL_CLASS}`) || item;
-    const titledLink = original.querySelector('a[title]');
+    const titledLink = original.querySelector(siteConfig.titleSelector);
     const title = titledLink?.getAttribute('title')?.trim();
 
-    return title || original.textContent || '';
+    return title || titledLink?.textContent?.trim() || original.textContent || '';
   }
 
   function getRankText(item) {
@@ -673,8 +707,66 @@
     return keywords.find((keyword) => text.includes(keyword.toLocaleLowerCase())) || '';
   }
 
+  function isTableItem(item) {
+    return item.tagName === 'TR';
+  }
+
+  function getTablePlaceholder(item) {
+    const next = item.nextElementSibling;
+
+    if (next instanceof HTMLTableRowElement && next.classList.contains(TABLE_PLACEHOLDER_CLASS)) {
+      return next;
+    }
+
+    return null;
+  }
+
+  function blockTableItem(item, keyword) {
+    const columnCount = Math.max(item.children.length, 1);
+    let placeholderRow = getTablePlaceholder(item);
+    let placeholderButton = placeholderRow?.querySelector(`.${PLACEHOLDER_CLASS}`);
+
+    if (!placeholderRow) {
+      placeholderRow = document.createElement('tr');
+      placeholderRow.className = TABLE_PLACEHOLDER_CLASS;
+
+      const cell = document.createElement('td');
+      cell.colSpan = columnCount;
+
+      placeholderButton = document.createElement('button');
+      placeholderButton.type = 'button';
+      placeholderButton.className = PLACEHOLDER_CLASS;
+      placeholderButton.title = '点击显示原内容';
+      placeholderButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        revealItem(item);
+      });
+
+      cell.appendChild(placeholderButton);
+      placeholderRow.appendChild(cell);
+      item.after(placeholderRow);
+    } else {
+      const cell = placeholderRow.firstElementChild;
+
+      if (cell instanceof HTMLTableCellElement) {
+        cell.colSpan = columnCount;
+      }
+    }
+
+    item.classList.add(BLOCKED_CLASS, TABLE_HIDDEN_CLASS);
+    item.setAttribute(KEYWORD_ATTR, keyword);
+    placeholderRow.setAttribute(KEYWORD_ATTR, keyword);
+    placeholderButton.textContent = `${getRankText(item)}已屏蔽「${keyword}」`;
+  }
+
   function blockItem(item, keyword) {
     if (item.getAttribute(REVEALED_ATTR) === '1') {
+      return;
+    }
+
+    if (isTableItem(item)) {
+      blockTableItem(item, keyword);
       return;
     }
 
@@ -716,6 +808,13 @@
   }
 
   function unblockItem(item) {
+    if (isTableItem(item)) {
+      getTablePlaceholder(item)?.remove();
+      item.classList.remove(BLOCKED_CLASS, TABLE_HIDDEN_CLASS);
+      item.removeAttribute(KEYWORD_ATTR);
+      return;
+    }
+
     const original = item.querySelector(`:scope > .${ORIGINAL_CLASS}`);
     const placeholder = item.querySelector(`:scope > .${PLACEHOLDER_CLASS}`);
 
@@ -755,11 +854,11 @@
       return;
     }
 
-    if (root instanceof Element && root.matches(LIST_ITEM_SELECTOR)) {
+    if (root instanceof Element && root.matches(siteConfig.itemSelector)) {
       processItem(root);
     }
 
-    for (const item of root.querySelectorAll(LIST_ITEM_SELECTOR)) {
+    for (const item of root.querySelectorAll(siteConfig.itemSelector)) {
       processItem(item);
     }
   }
@@ -777,7 +876,7 @@
   }
 
   function refreshBlockedItems(resetRevealed = false) {
-    for (const item of document.querySelectorAll(LIST_ITEM_SELECTOR)) {
+    for (const item of document.querySelectorAll(siteConfig.itemSelector)) {
       if (resetRevealed) {
         item.removeAttribute(REVEALED_ATTR);
       }
