@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.6
+// @version      0.2.7
 // @description  在摸摸鱼、多摸鱼热榜、LINUX DO 中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -95,7 +95,6 @@
 
     .${TABLE_PLACEHOLDER_CLASS} .${PLACEHOLDER_CLASS} {
       padding: 11px 10px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.08);
       box-sizing: border-box;
     }
 
