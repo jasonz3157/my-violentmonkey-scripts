@@ -12,6 +12,9 @@
 ## `momoyu-keyword-blocker.js`
 在 momoyu.cc 热榜列表中按关键词屏蔽条目，点击屏蔽占位文本可显示原内容，并支持关键词增加、删除、导入、导出。
 
+## `ithome-high-against-comment-blocker.js`
+在 IT之家文章评论区屏蔽反对率大于等于 75% 且反对数大于等于 5 的评论，支持楼中楼评论。
+
 ## `duomoyu-hot-list-scrollbar-fix.css`
 修复 duomoyu.com 热榜卡片 hover 时因滚动条出现导致的排版抖动。
 
