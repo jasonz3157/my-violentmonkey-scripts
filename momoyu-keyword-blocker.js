@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.7
+// @version      0.2.8
 // @description  在摸摸鱼、多摸鱼热榜、LINUX DO 中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -874,6 +874,23 @@
     }, 120);
   }
 
+  function scanAddedNode(node) {
+    if (!(node instanceof Element || node instanceof DocumentFragment)) {
+      return false;
+    }
+
+    if (node instanceof Element) {
+      const item = node.closest(siteConfig.itemSelector);
+
+      if (item) {
+        processItem(item);
+      }
+    }
+
+    scan(node);
+    return true;
+  }
+
   function refreshBlockedItems(resetRevealed = false) {
     for (const item of document.querySelectorAll(siteConfig.itemSelector)) {
       if (resetRevealed) {
@@ -890,14 +907,9 @@
 
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
-          if (node instanceof Element) {
+          if (scanAddedNode(node)) {
             needsScan = true;
-            break;
           }
-        }
-
-        if (needsScan) {
-          break;
         }
       }
 
