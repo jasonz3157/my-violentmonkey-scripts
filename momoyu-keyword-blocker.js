@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.8
+// @version      0.2.9
 // @description  在摸摸鱼、多摸鱼热榜、LINUX DO 中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -42,6 +42,7 @@
   const BLOCKED_CLASS = 'mmk-blocked';
   const TABLE_HIDDEN_CLASS = 'mmk-table-hidden';
   const TABLE_PLACEHOLDER_CLASS = 'mmk-table-placeholder-row';
+  const TABLE_PLACEHOLDER_HEIGHT_OFFSET = 1;
   const REVEALED_ATTR = 'data-mmk-revealed';
   const KEYWORD_ATTR = 'data-mmk-keyword';
   const ORIGINAL_CLASS = 'mmk-original';
@@ -68,6 +69,7 @@
     }
 
     .${PLACEHOLDER_CLASS} {
+      display: block;
       width: 100%;
       min-height: 17px;
       padding: 0;
@@ -720,6 +722,19 @@
     return null;
   }
 
+  function syncTablePlaceholderHeight(item, placeholderButton) {
+    if (item.classList.contains(TABLE_HIDDEN_CLASS)) {
+      return;
+    }
+
+    const itemHeight = item.getBoundingClientRect().height;
+
+    if (itemHeight > 1) {
+      // linux.do 的表格行会额外计入约 1px 行边界, 占位按钮需扣除后才能等高。
+      placeholderButton.style.height = `${itemHeight - TABLE_PLACEHOLDER_HEIGHT_OFFSET}px`;
+    }
+  }
+
   function blockTableItem(item, keyword) {
     const columnCount = Math.max(item.children.length, 1);
     let placeholderRow = getTablePlaceholder(item);
@@ -753,6 +768,7 @@
       }
     }
 
+    syncTablePlaceholderHeight(item, placeholderButton);
     item.classList.add(BLOCKED_CLASS, TABLE_HIDDEN_CLASS);
     item.setAttribute(KEYWORD_ATTR, keyword);
     placeholderRow.setAttribute(KEYWORD_ATTR, keyword);
