@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.9
+// @version      0.2.10
 // @description  在摸摸鱼、多摸鱼热榜、LINUX DO 中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -41,7 +41,9 @@
   ];
   const BLOCKED_CLASS = 'mmk-blocked';
   const TABLE_HIDDEN_CLASS = 'mmk-table-hidden';
+  const TABLE_PENDING_CLASS = 'mmk-table-pending';
   const TABLE_PLACEHOLDER_CLASS = 'mmk-table-placeholder-row';
+  const TABLE_PLACEHOLDER_PENDING_CLASS = 'mmk-table-placeholder-pending';
   const TABLE_PLACEHOLDER_HEIGHT_OFFSET = 1;
   const REVEALED_ATTR = 'data-mmk-revealed';
   const KEYWORD_ATTR = 'data-mmk-keyword';
@@ -62,6 +64,7 @@
   let syncTimer = 0;
   let isSyncing = false;
   let hasPendingSync = false;
+  const pendingTableBlocks = new WeakMap();
 
   GM_addStyle(`
     .${ORIGINAL_CLASS} {
@@ -88,6 +91,14 @@
     }
 
     .${TABLE_HIDDEN_CLASS} {
+      display: none !important;
+    }
+
+    .${TABLE_PENDING_CLASS} {
+      visibility: hidden !important;
+    }
+
+    .${TABLE_PLACEHOLDER_PENDING_CLASS} {
       display: none !important;
     }
 
@@ -735,10 +746,39 @@
     }
   }
 
+  function finishPendingTableBlock(item, placeholderRow, placeholderButton, token) {
+    if (pendingTableBlocks.get(item) !== token) {
+      return;
+    }
+
+    pendingTableBlocks.delete(item);
+
+    if (!item.isConnected || !placeholderRow.isConnected || item.getAttribute(REVEALED_ATTR) === '1') {
+      return;
+    }
+
+    syncTablePlaceholderHeight(item, placeholderButton);
+    placeholderRow.classList.remove(TABLE_PLACEHOLDER_PENDING_CLASS);
+    item.classList.remove(TABLE_PENDING_CLASS);
+    item.classList.add(TABLE_HIDDEN_CLASS);
+  }
+
+  function schedulePendingTableBlock(item, placeholderRow, placeholderButton) {
+    const token = {};
+    pendingTableBlocks.set(item, token);
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        finishPendingTableBlock(item, placeholderRow, placeholderButton, token);
+      });
+    });
+  }
+
   function blockTableItem(item, keyword) {
     const columnCount = Math.max(item.children.length, 1);
     let placeholderRow = getTablePlaceholder(item);
     let placeholderButton = placeholderRow?.querySelector(`.${PLACEHOLDER_CLASS}`);
+    const isAlreadyHidden = item.classList.contains(TABLE_HIDDEN_CLASS);
 
     if (!placeholderRow) {
       placeholderRow = document.createElement('tr');
@@ -769,10 +809,19 @@
     }
 
     syncTablePlaceholderHeight(item, placeholderButton);
-    item.classList.add(BLOCKED_CLASS, TABLE_HIDDEN_CLASS);
+    item.classList.add(BLOCKED_CLASS);
     item.setAttribute(KEYWORD_ATTR, keyword);
     placeholderRow.setAttribute(KEYWORD_ATTR, keyword);
     placeholderButton.textContent = `${getRankText(item)}已屏蔽「${keyword}」`;
+
+    if (isAlreadyHidden) {
+      item.classList.add(TABLE_HIDDEN_CLASS);
+      return;
+    }
+
+    item.classList.add(TABLE_PENDING_CLASS);
+    placeholderRow.classList.add(TABLE_PLACEHOLDER_PENDING_CLASS);
+    schedulePendingTableBlock(item, placeholderRow, placeholderButton);
   }
 
   function blockItem(item, keyword) {
@@ -824,8 +873,9 @@
 
   function unblockItem(item) {
     if (isTableItem(item)) {
+      pendingTableBlocks.delete(item);
       getTablePlaceholder(item)?.remove();
-      item.classList.remove(BLOCKED_CLASS, TABLE_HIDDEN_CLASS);
+      item.classList.remove(BLOCKED_CLASS, TABLE_HIDDEN_CLASS, TABLE_PENDING_CLASS);
       item.removeAttribute(KEYWORD_ATTR);
       return;
     }
@@ -907,6 +957,23 @@
     return true;
   }
 
+  function scanChangedNode(node) {
+    const element = node instanceof Element ? node : node.parentElement;
+
+    if (!element) {
+      return false;
+    }
+
+    const item = element.closest(siteConfig.itemSelector);
+
+    if (!item) {
+      return false;
+    }
+
+    processItem(item);
+    return true;
+  }
+
   function refreshBlockedItems(resetRevealed = false) {
     for (const item of document.querySelectorAll(siteConfig.itemSelector)) {
       if (resetRevealed) {
@@ -922,10 +989,14 @@
       let needsScan = false;
 
       for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (scanAddedNode(node)) {
-            needsScan = true;
+        if (mutation.type === 'childList') {
+          for (const node of mutation.addedNodes) {
+            if (scanAddedNode(node)) {
+              needsScan = true;
+            }
           }
+        } else if (scanChangedNode(mutation.target)) {
+          needsScan = true;
         }
       }
 
@@ -935,7 +1006,10 @@
     });
 
     observer.observe(document.documentElement, {
+      attributeFilter: ['class', 'title'],
+      attributes: true,
       childList: true,
+      characterData: true,
       subtree: true,
     });
   }
