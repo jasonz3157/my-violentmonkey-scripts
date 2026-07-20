@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         摸摸鱼关键词屏蔽
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.10
+// @version      0.2.11
 // @description  在摸摸鱼、多摸鱼热榜、LINUX DO 中按关键词屏蔽条目，并支持关键词导入导出。
 // @author       jasonz3157
 // @match        https://momoyu.cc/*
@@ -31,12 +31,14 @@
   const DEFAULT_SITE_CONFIG = {
     itemSelector: '.hot-content > li, ul.news-list > li.news',
     titleSelector: 'a[title]',
+    observeContentChanges: false,
   };
   const SITE_CONFIGS = [
     {
       hosts: ['linux.do'],
       itemSelector: 'tr.topic-list-item, .topic-list-item, .latest-topic-list-item',
       titleSelector: 'a.title.raw-link.raw-topic-link, a.raw-topic-link, a.topic-title',
+      observeContentChanges: true,
     },
   ];
   const BLOCKED_CLASS = 'mmk-blocked';
@@ -809,18 +811,51 @@
     }
 
     syncTablePlaceholderHeight(item, placeholderButton);
-    item.classList.add(BLOCKED_CLASS);
-    item.setAttribute(KEYWORD_ATTR, keyword);
-    placeholderRow.setAttribute(KEYWORD_ATTR, keyword);
-    placeholderButton.textContent = `${getRankText(item)}已屏蔽「${keyword}」`;
+
+    if (!item.classList.contains(BLOCKED_CLASS)) {
+      item.classList.add(BLOCKED_CLASS);
+    }
+
+    if (item.getAttribute(KEYWORD_ATTR) !== keyword) {
+      item.setAttribute(KEYWORD_ATTR, keyword);
+    }
+
+    if (placeholderRow.getAttribute(KEYWORD_ATTR) !== keyword) {
+      placeholderRow.setAttribute(KEYWORD_ATTR, keyword);
+    }
+
+    const placeholderText = `${getRankText(item)}已屏蔽「${keyword}」`;
+
+    if (placeholderButton.textContent !== placeholderText) {
+      placeholderButton.textContent = placeholderText;
+    }
 
     if (isAlreadyHidden) {
-      item.classList.add(TABLE_HIDDEN_CLASS);
+      pendingTableBlocks.delete(item);
+
+      if (item.classList.contains(TABLE_PENDING_CLASS)) {
+        item.classList.remove(TABLE_PENDING_CLASS);
+      }
+
+      if (placeholderRow.classList.contains(TABLE_PLACEHOLDER_PENDING_CLASS)) {
+        placeholderRow.classList.remove(TABLE_PLACEHOLDER_PENDING_CLASS);
+      }
+
       return;
     }
 
-    item.classList.add(TABLE_PENDING_CLASS);
-    placeholderRow.classList.add(TABLE_PLACEHOLDER_PENDING_CLASS);
+    if (!item.classList.contains(TABLE_PENDING_CLASS)) {
+      item.classList.add(TABLE_PENDING_CLASS);
+    }
+
+    if (!placeholderRow.classList.contains(TABLE_PLACEHOLDER_PENDING_CLASS)) {
+      placeholderRow.classList.add(TABLE_PLACEHOLDER_PENDING_CLASS);
+    }
+
+    if (pendingTableBlocks.has(item)) {
+      return;
+    }
+
     schedulePendingTableBlock(item, placeholderRow, placeholderButton);
   }
 
@@ -861,9 +896,19 @@
       item.appendChild(placeholder);
     }
 
-    item.classList.add(BLOCKED_CLASS);
-    item.setAttribute(KEYWORD_ATTR, keyword);
-    placeholder.textContent = `${getRankText(item)}已屏蔽「${keyword}」`;
+    if (!item.classList.contains(BLOCKED_CLASS)) {
+      item.classList.add(BLOCKED_CLASS);
+    }
+
+    if (item.getAttribute(KEYWORD_ATTR) !== keyword) {
+      item.setAttribute(KEYWORD_ATTR, keyword);
+    }
+
+    const placeholderText = `${getRankText(item)}已屏蔽「${keyword}」`;
+
+    if (placeholder.textContent !== placeholderText) {
+      placeholder.textContent = placeholderText;
+    }
   }
 
   function revealItem(item) {
@@ -873,15 +918,36 @@
 
   function unblockItem(item) {
     if (isTableItem(item)) {
+      const placeholder = getTablePlaceholder(item);
+      const hasManagedClass = [BLOCKED_CLASS, TABLE_HIDDEN_CLASS, TABLE_PENDING_CLASS].some((className) =>
+        item.classList.contains(className),
+      );
+
+      if (!placeholder && !hasManagedClass && !item.hasAttribute(KEYWORD_ATTR)) {
+        return;
+      }
+
       pendingTableBlocks.delete(item);
-      getTablePlaceholder(item)?.remove();
-      item.classList.remove(BLOCKED_CLASS, TABLE_HIDDEN_CLASS, TABLE_PENDING_CLASS);
-      item.removeAttribute(KEYWORD_ATTR);
+      placeholder?.remove();
+
+      if (hasManagedClass) {
+        item.classList.remove(BLOCKED_CLASS, TABLE_HIDDEN_CLASS, TABLE_PENDING_CLASS);
+      }
+
+      if (item.hasAttribute(KEYWORD_ATTR)) {
+        item.removeAttribute(KEYWORD_ATTR);
+      }
+
       return;
     }
 
     const original = item.querySelector(`:scope > .${ORIGINAL_CLASS}`);
     const placeholder = item.querySelector(`:scope > .${PLACEHOLDER_CLASS}`);
+    const isBlocked = item.classList.contains(BLOCKED_CLASS);
+
+    if (!original && !placeholder && !isBlocked && !item.hasAttribute(KEYWORD_ATTR)) {
+      return;
+    }
 
     if (placeholder) {
       placeholder.remove();
@@ -895,8 +961,13 @@
       original.remove();
     }
 
-    item.classList.remove(BLOCKED_CLASS);
-    item.removeAttribute(KEYWORD_ATTR);
+    if (isBlocked) {
+      item.classList.remove(BLOCKED_CLASS);
+    }
+
+    if (item.hasAttribute(KEYWORD_ATTR)) {
+      item.removeAttribute(KEYWORD_ATTR);
+    }
   }
 
   function processItem(item) {
@@ -945,16 +1016,27 @@
       return false;
     }
 
-    if (node instanceof Element) {
-      const item = node.closest(siteConfig.itemSelector);
+    let closestItem = null;
 
-      if (item) {
-        processItem(item);
+    if (node instanceof Element) {
+      closestItem = node.closest(siteConfig.itemSelector);
+
+      if (closestItem) {
+        processItem(closestItem);
       }
     }
 
-    scan(node);
-    return true;
+    let hasMatchedItem = Boolean(closestItem);
+
+    for (const item of node.querySelectorAll(siteConfig.itemSelector)) {
+      if (item !== closestItem) {
+        processItem(item);
+      }
+
+      hasMatchedItem = true;
+    }
+
+    return hasMatchedItem;
   }
 
   function scanChangedNode(node) {
@@ -1005,13 +1087,20 @@
       }
     });
 
-    observer.observe(document.documentElement, {
-      attributeFilter: ['class', 'title'],
-      attributes: true,
+    const options = {
       childList: true,
-      characterData: true,
       subtree: true,
-    });
+    };
+
+    // Angular 页面会频繁修改 class。监听这些属性会让回调进入 Angular 的
+    // 变更检测，并与脚本自身的 class 更新互相触发，导致多摸鱼热榜无法完成渲染。
+    if (siteConfig.observeContentChanges) {
+      options.attributeFilter = ['class', 'title'];
+      options.attributes = true;
+      options.characterData = true;
+    }
+
+    observer.observe(document.documentElement, options);
   }
 
   function createButton(text, className = '') {
