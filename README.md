@@ -6,6 +6,9 @@
 ## `github-iso-time-tooltip.js`
 将 GitHub 页面中时间元素的 tooltip 日期时间改为本地时区格式，例如 `2026-05-13 15:00:00 +08:00`。
 
+## `gitlab-shortcuts.js`
+在 GitLab 左侧栏顶部添加 Admin 和 Runners 页面快捷入口。
+
 ## `zhihu-disable-search-kw.js`
 将知乎回答中的搜索关键字改回普通文本格式。
 
