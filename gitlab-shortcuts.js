@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitLab 快捷入口
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.0
-// @description  在 GitLab 左侧栏顶部添加 Admin 和 Runners 页面快捷入口。
+// @version      0.4.0
+// @description  在 GitLab 左侧栏顶部添加常用页面快捷入口，并隐藏 Create new 按钮。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
 // @grant        none
@@ -16,6 +16,7 @@
   'use strict';
 
   const SIDEBAR_TOGGLE_SELECTOR = '[data-testid="super-sidebar-collapse-button"]';
+  const CREATE_NEW_MENU_SELECTOR = '[data-testid="new-menu-toggle"]';
   const ICON_SPRITE_URL =
     '/assets/icons-5af6a635d810e1104f2def09ede3ada64866640a56f75b704457f18be086e881.svg';
   const SHORTCUTS = [
@@ -31,7 +32,21 @@
       label: 'Runners',
       icon: 'rocket',
     },
+    {
+      id: 'vm-gitlab-dba-shortcut',
+      href: '/repos/dba',
+      label: 'DBA',
+      iconHref:
+        '/assets/icons-b25b55b72e1a86a9ca8055a5c421aae9b89fc86363fa02e2109034d756e56d28.svg#subgroup',
+    },
   ];
+
+  function hideCreateNewButton() {
+    const style = document.createElement('style');
+
+    style.textContent = `${CREATE_NEW_MENU_SELECTOR} { display: none !important; }`;
+    (document.head ?? document.documentElement).appendChild(style);
+  }
 
   function createShortcutButton(shortcut) {
     const link = document.createElement('a');
@@ -48,7 +63,10 @@
     icon.setAttribute('role', 'img');
     icon.setAttribute('aria-hidden', 'true');
     icon.setAttribute('class', 'gl-button-icon gl-icon s16');
-    iconUse.setAttribute('href', `${ICON_SPRITE_URL}#${shortcut.icon}`);
+    iconUse.setAttribute(
+      'href',
+      shortcut.iconHref ?? `${ICON_SPRITE_URL}#${shortcut.icon}`,
+    );
 
     icon.appendChild(iconUse);
     link.appendChild(icon);
@@ -88,6 +106,8 @@
       subtree: true,
     });
   }
+
+  hideCreateNewButton();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });
