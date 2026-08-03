@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab Runner 作业状态统计
 // @namespace    my-violentmonkey-scripts
-// @version      0.1.0
+// @version      0.1.1
 // @description  在 GitLab 管理员 Runner 页面增加 Idle 和 Running 状态统计。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
 
-  if (window.location.pathname !== '/admin/runners') {
+  if (!/^\/admin\/runners\/?$/.test(window.location.pathname)) {
     return;
   }
 
@@ -27,6 +27,7 @@
     '[data-testid="runner-stats-offline"]',
     '[data-testid="runner-stats-stale"]',
   ];
+  const BUILT_IN_STAT_TITLES = new Set(['Online', 'Offline', 'Stale']);
   const SUMMARY_ID = 'vm-runner-job-status-summary';
   const DIVIDER_ID = 'vm-runner-job-status-divider';
   const IDLE_STAT_ID = 'vm-runner-job-status-idle';
@@ -69,11 +70,13 @@
         display: contents;
       }
 
-      #${IDLE_STAT_ID} [data-testid="meta-icon"] {
+      #${IDLE_STAT_ID} [data-testid="meta-icon"],
+      #${IDLE_STAT_ID} .vm-runner-job-status-icon {
         color: var(--gl-text-color-disabled, #737278) !important;
       }
 
-      #${RUNNING_STAT_ID} [data-testid="meta-icon"] {
+      #${RUNNING_STAT_ID} [data-testid="meta-icon"],
+      #${RUNNING_STAT_ID} .vm-runner-job-status-icon {
         color: var(--gl-status-info-icon-color, #1f75cb) !important;
       }
     `;
@@ -81,18 +84,49 @@
     (document.head ?? document.documentElement).appendChild(style);
   }
 
-  function findBuiltInStats() {
-    return BUILT_IN_STAT_SELECTORS.map((selector) => document.querySelector(selector)).filter(
-      Boolean,
+  function getTitleElement(stat) {
+    const titleElement = stat.querySelector('[data-testid="title-text"]');
+
+    if (titleElement) {
+      return titleElement;
+    }
+
+    return [...stat.querySelectorAll('span')].find((element) =>
+      BUILT_IN_STAT_TITLES.has(element.textContent.trim()),
     );
   }
 
+  function getStatTitle(stat) {
+    return getTitleElement(stat)?.textContent.trim() ?? '';
+  }
+
+  function findBuiltInStats() {
+    const candidates = new Set([
+      ...BUILT_IN_STAT_SELECTORS.map((selector) => document.querySelector(selector)).filter(
+        Boolean,
+      ),
+      ...document.querySelectorAll('.gl-single-stat'),
+    ]);
+
+    return [...candidates]
+      .filter((stat) => BUILT_IN_STAT_TITLES.has(getStatTitle(stat)))
+      .sort((left, right) => {
+        const position = left.compareDocumentPosition(right);
+
+        return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+      });
+  }
+
   function setIcon(stat, iconName) {
-    const iconUse = stat.querySelector('[data-testid="meta-icon"] use');
+    const iconUse =
+      stat.querySelector('[data-testid="meta-icon"] use') ??
+      [...stat.querySelectorAll('svg use')].at(-1);
 
     if (!iconUse) {
       return;
     }
+
+    iconUse.closest('svg')?.classList.add('vm-runner-job-status-icon');
 
     for (const attrName of ['href', 'xlink:href']) {
       const href = iconUse.getAttribute(attrName);
@@ -126,7 +160,7 @@
 
   function createStat(source, id, title, count, iconName) {
     const stat = source.cloneNode(true);
-    const titleElement = stat.querySelector('[data-testid="title-text"]');
+    const titleElement = getTitleElement(stat);
     const valueElement = getValueElement(stat);
 
     stat.id = id;
@@ -152,8 +186,8 @@
     const builtInStats = findBuiltInStats();
     const lastBuiltInStat = builtInStats.at(-1);
     const container = lastBuiltInStat?.parentElement;
-    const onlineStat = document.querySelector('[data-testid="runner-stats-online"]');
-    const offlineStat = document.querySelector('[data-testid="runner-stats-offline"]');
+    const onlineStat = builtInStats.find((stat) => getStatTitle(stat) === 'Online');
+    const offlineStat = builtInStats.find((stat) => getStatTitle(stat) === 'Offline');
 
     if (!container) {
       return;
