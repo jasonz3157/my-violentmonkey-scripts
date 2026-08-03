@@ -4,7 +4,6 @@
 // @version      0.1.0
 // @description  在 GitLab 管理员 Runner 页面增加 Idle 和 Running 状态统计。
 // @author       jasonz3157
-// @match        https://git.darcytech.com/admin/runners*
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
 // @grant        none
 // @run-at       document-start
