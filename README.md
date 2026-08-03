@@ -9,6 +9,9 @@
 ## `gitlab-shortcuts.js`
 在 GitLab 左侧栏顶部添加 Admin、Runners 和 DBA 页面快捷入口，并隐藏 Create new 按钮。
 
+## `gitlab-runner-job-status-summary.js`
+在 GitLab 管理员 Runner 页面原有状态统计右侧增加 Idle 和 Running 作业状态统计。
+
 ## `zhihu-disable-search-kw.js`
 将知乎回答中的搜索关键字改回普通文本格式。
 
