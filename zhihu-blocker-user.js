@@ -1,15 +1,18 @@
 // ==UserScript==
 // @name         知乎屏蔽用户评论
 // @namespace    jasonz3157
-// @version      0.11
+// @version      0.12
 // @description  知乎屏蔽指定用户，将他的评论和回答隐藏。
 // @author       jasonz3157
 // @match        *://*.zhihu.com/*
 // @icon         https://static.zhihu.com/heifetz/favicon.ico
 // @grant        GM_addStyle
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_xmlhttpRequest
+// @connect      *
 // @license      GPL-3.0
 // @downloadURL  https://github.com/jasonz3157/my-violentmonkey-scripts/raw/refs/heads/master/zhihu-blocker-user.js
 // @updateURL    https://github.com/jasonz3157/my-violentmonkey-scripts/raw/refs/heads/master/zhihu-blocker-user.js
@@ -65,7 +68,14 @@
   const ENUMS_ELEMENT_ID = {
     SPLIT_LINE: 'shurlormes-quick-split-line-btn',
     BLOCK_LEVEL: 'shurlormes-quick-block-level-btn',
-    IMPORT_TEXTAREA: 'shurlormes-import-textarea'
+    IMPORT_TEXTAREA: 'shurlormes-import-textarea',
+    WEBDAV_URL: 'shurlormes-webdav-url',
+    WEBDAV_DIRECTORY: 'shurlormes-webdav-directory',
+    WEBDAV_USERNAME: 'shurlormes-webdav-username',
+    WEBDAV_PASSWORD: 'shurlormes-webdav-password',
+    WEBDAV_SAVE: 'shurlormes-webdav-save',
+    WEBDAV_SYNC: 'shurlormes-webdav-sync',
+    WEBDAV_STATUS: 'shurlormes-webdav-status'
   }
 
   const ENUMS_STORAGE_KEY = {
@@ -101,6 +111,21 @@
   const TYPE_BTN_TXT = [ENUMS_BLOCK_BTN_TXT.BLOCK, ENUMS_BLOCK_BTN_TXT.CANCEL];
   const TYPE_BTN_TITLE_TXT = [ENUMS_BLOCK_BTN_TXT.BLOCK_TITLE, ENUMS_BLOCK_BTN_TXT.CANCEL_TITLE];
 
+  const WEBDAV_CONFIG_KEY = 'zhihu-blocker-user-webdav-config';
+  const BLOCKED_USERS_KEY = 'zhihu-blocker-user-blocked-users';
+  const UPDATED_AT_KEY = 'zhihu-blocker-user-updated-at';
+  const SYNC_FILE_NAME = 'blocked-users.json';
+  const DEFAULT_WEBDAV_CONFIG = {
+    url: '',
+    directory: 'zhihu-blocker/',
+    username: '',
+    password: ''
+  };
+
+  let syncTimer = 0;
+  let isSyncing = false;
+  let hasPendingSync = false;
+
   //执行间隔，单位毫秒
   const INTERVAL_TIME = 500;
 
@@ -113,6 +138,15 @@
   GM_addStyle(
     '.shurlormes-display-none {display: none}'
   );
+  GM_addStyle(`
+    .shurlormes-webdav-settings {display: grid;gap: 8px;margin-top: 8px;}
+    .shurlormes-webdav-field {display: grid;grid-template-columns: 90px 1fr;align-items: center;gap: 8px;line-height: normal;}
+    .shurlormes-webdav-field input {height: 30px;padding: 0 8px;border: 1px solid #d8d8d8;border-radius: 3px;box-sizing: border-box;}
+    .shurlormes-webdav-actions {display: flex;gap: 8px;margin-top: 10px;}
+    .shurlormes-webdav-actions button {height: 30px;padding: 0 12px;border: 1px solid #d0d0d0;border-radius: 3px;background: #fff;cursor: pointer;}
+    .shurlormes-webdav-actions button:last-child {border-color: #1772f6;color: #fff;background: #1772f6;}
+    #${ENUMS_ELEMENT_ID.WEBDAV_STATUS} {min-height: 18px;margin-top: 6px;font-size: 12px;line-height: 18px;color: #666;}
+  `);
 
   GM_registerMenuCommand('导出屏蔽用户', function () {
     const blockUserKeys = [];
@@ -156,12 +190,17 @@
           let blockUserIds = txt.split(',');
           if (blockUserIds.length > 0) {
             for (let i = 0; i < blockUserIds.length; i++) {
-              localStorage.setItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + blockUserIds[i], 1);
+              const blockUserId = blockUserIds[i].trim();
+              if (!blockUserId) {
+                continue;
+              }
+              localStorage.setItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + blockUserId, 1);
               //知乎屏蔽接口调用
               setTimeout(() => {
-                blockUserToZhiHu(blockUserIds[i], 'POST');
+                blockUserToZhiHu(blockUserId, 'POST');
               }, 100);
             }
+            markBlockedUsersChanged();
           }
         }
       }
@@ -203,12 +242,26 @@
                             <input type="radio" name="${showQuickBtnRadioName}" ${ENUMS_ATTR.KEY}="${ENUMS_STORAGE_KEY.SHOW_QUICK_BUTTON}" value="1" ${localStorage.getItem(ENUMS_STORAGE_KEY.SHOW_QUICK_BUTTON) ? 'checked' : ''}> 显示
                         </div>
                     </div>
+
+                    <div style="margin: 20px 0 5px 0;padding-top: 14px;border-top: 1px solid #eee;">WebDAV 同步</div>
+                    <div class="shurlormes-webdav-settings">
+                        <label class="shurlormes-webdav-field">WebDAV 地址<input id="${ENUMS_ELEMENT_ID.WEBDAV_URL}" type="url" placeholder="https://example.com/webdav"></label>
+                        <label class="shurlormes-webdav-field">目录<input id="${ENUMS_ELEMENT_ID.WEBDAV_DIRECTORY}" type="text" placeholder="${DEFAULT_WEBDAV_CONFIG.directory}"></label>
+                        <label class="shurlormes-webdav-field">用户名<input id="${ENUMS_ELEMENT_ID.WEBDAV_USERNAME}" type="text" autocomplete="username"></label>
+                        <label class="shurlormes-webdav-field">密码<input id="${ENUMS_ELEMENT_ID.WEBDAV_PASSWORD}" type="password" autocomplete="current-password"></label>
+                    </div>
+                    <div class="shurlormes-webdav-actions">
+                        <button id="${ENUMS_ELEMENT_ID.WEBDAV_SAVE}" type="button">保存配置</button>
+                        <button id="${ENUMS_ELEMENT_ID.WEBDAV_SYNC}" type="button">立即同步</button>
+                    </div>
+                    <div id="${ENUMS_ELEMENT_ID.WEBDAV_STATUS}"></div>
 				</div>
 			`;
-    popup.alert({ title: '配置中心', content: content, width: 200 });
+    popup.alert({ title: '配置中心', content: content });
     configCenterRadioEvent(blockLevelRadioName);
     configCenterRadioEvent(showSplitLineRadioName);
     configCenterRadioEvent(showQuickBtnRadioName);
+    setupWebdavConfigCenter();
   });
 
   let configCenterRadioEvent = function (radioName) {
@@ -224,6 +277,332 @@
         toggleUserComponentVisibility();
         refreshQuickBtn();
       });
+    }
+  }
+
+  function loadWebdavConfig() {
+    const saved = GM_getValue(WEBDAV_CONFIG_KEY, {});
+    const config = saved && typeof saved === 'object' ? saved : {};
+
+    return {
+      url: String(config.url || '').trim(),
+      directory: String(config.directory || DEFAULT_WEBDAV_CONFIG.directory).trim(),
+      username: String(config.username || ''),
+      password: String(config.password || '')
+    };
+  }
+
+  function saveWebdavConfig(config) {
+    GM_setValue(WEBDAV_CONFIG_KEY, {
+      url: String(config.url || '').trim(),
+      directory: String(config.directory || DEFAULT_WEBDAV_CONFIG.directory).trim(),
+      username: String(config.username || ''),
+      password: String(config.password || '')
+    });
+  }
+
+  function getWebdavConfigFromCenter() {
+    return {
+      url: document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_URL).value,
+      directory: document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_DIRECTORY).value,
+      username: document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_USERNAME).value,
+      password: document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_PASSWORD).value
+    };
+  }
+
+  function setupWebdavConfigCenter() {
+    const config = loadWebdavConfig();
+    document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_URL).value = config.url;
+    document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_DIRECTORY).value = config.directory;
+    document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_USERNAME).value = config.username;
+    document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_PASSWORD).value = config.password;
+    setWebdavStatus(config.url ? '等待同步' : '未启用同步');
+
+    document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_SAVE).addEventListener('click', function () {
+      saveWebdavConfig(getWebdavConfigFromCenter());
+      setWebdavStatus('配置已保存');
+    });
+    document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_SYNC).addEventListener('click', function () {
+      saveWebdavConfig(getWebdavConfigFromCenter());
+      syncWebdavBlockedUsers('manual');
+    });
+  }
+
+  function getLocalStorageBlockedUserIds() {
+    const result = [];
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(ENUMS_STORAGE_KEY.BLOCK_PREFIX)) {
+        result.push(key.slice(ENUMS_STORAGE_KEY.BLOCK_PREFIX.length));
+      }
+    }
+
+    return normalizeBlockedUserIds(result);
+  }
+
+  function getBlockedUserIds() {
+    const saved = GM_getValue(BLOCKED_USERS_KEY, null);
+    return Array.isArray(saved) ? normalizeBlockedUserIds(saved) : getLocalStorageBlockedUserIds();
+  }
+
+  function replaceLocalStorageBlockedUserIds(userIds) {
+    const currentUserIds = getLocalStorageBlockedUserIds();
+    const normalizedUserIds = normalizeBlockedUserIds(userIds);
+    const nextSet = new Set(normalizedUserIds);
+
+    for (const userId of currentUserIds) {
+      if (!nextSet.has(userId)) {
+        localStorage.removeItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + userId);
+      }
+    }
+    for (const userId of normalizedUserIds) {
+      localStorage.setItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + userId, 1);
+    }
+  }
+
+  function initializeBlockedUsersStorage() {
+    const saved = GM_getValue(BLOCKED_USERS_KEY, null);
+    const userIds = Array.isArray(saved) ? normalizeBlockedUserIds(saved) : getLocalStorageBlockedUserIds();
+    GM_setValue(BLOCKED_USERS_KEY, userIds);
+    replaceLocalStorageBlockedUserIds(userIds);
+  }
+
+  function normalizeBlockedUserIds(values) {
+    return [...new Set(values.map((value) => String(value).trim()).filter(Boolean))].sort();
+  }
+
+  function getLocalUpdatedAt() {
+    const updatedAt = Number(GM_getValue(UPDATED_AT_KEY, 0));
+    return Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0;
+  }
+
+  function setLocalUpdatedAt(updatedAt) {
+    GM_setValue(UPDATED_AT_KEY, updatedAt);
+  }
+
+  function markBlockedUsersChanged() {
+    GM_setValue(BLOCKED_USERS_KEY, getLocalStorageBlockedUserIds());
+    setLocalUpdatedAt(Date.now());
+    scheduleWebdavSync();
+  }
+
+  function areBlockedUserIdsEqual(left, right) {
+    return left.length === right.length && left.every((userId, index) => userId === right[index]);
+  }
+
+  function applyBlockedUserIds(nextUserIds, syncZhihu = true) {
+    const currentUserIds = getBlockedUserIds();
+    const normalizedUserIds = normalizeBlockedUserIds(nextUserIds);
+    const currentSet = new Set(currentUserIds);
+    const nextSet = new Set(normalizedUserIds);
+    const addedUserIds = normalizedUserIds.filter((userId) => !currentSet.has(userId));
+    const removedUserIds = currentUserIds.filter((userId) => !nextSet.has(userId));
+
+    GM_setValue(BLOCKED_USERS_KEY, normalizedUserIds);
+    replaceLocalStorageBlockedUserIds(normalizedUserIds);
+
+    for (const userId of removedUserIds) {
+      showCancelUserContent(HIDE_USER_COMMENT_COMPONENT_WITH_ID_CLASS, USER_COMMENT_COMPONENT_CLASS, userId);
+      showCancelUserContent(HIDE_USER_ANSWER_RICH_CONTENT_INNER_COMPONENT_WITH_ID_CLASS, USER_ANSWER_RICH_CONTENT_INNER_COMPONENT_CLASS, userId);
+      toggleBtn(userId, ENUMS_BLOCK_BTN_TYPE.CANCEL);
+      if (syncZhihu) {
+        blockUserToZhiHu(userId, 'DELETE');
+      }
+    }
+    for (const userId of addedUserIds) {
+      hideBlockedUserContent(userId);
+      toggleBtn(userId, ENUMS_BLOCK_BTN_TYPE.BLOCK);
+      if (syncZhihu) {
+        blockUserToZhiHu(userId, 'POST');
+      }
+    }
+  }
+
+  function parseWebdavPayload(text) {
+    const value = String(text || '').trim();
+    if (!value) {
+      return { blockedUserIds: [], updatedAt: 0 };
+    }
+
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return { blockedUserIds: normalizeBlockedUserIds(parsed), updatedAt: 0 };
+      }
+      if (parsed && typeof parsed === 'object') {
+        const userIds = parsed.blockedUserIds || parsed.userIds || [];
+        return {
+          blockedUserIds: normalizeBlockedUserIds(Array.isArray(userIds) ? userIds : String(userIds).split(',')),
+          updatedAt: Number(parsed.updatedAt) || 0
+        };
+      }
+    } catch (e) {
+      return { blockedUserIds: normalizeBlockedUserIds(value.split(/[\n,，;；\t]+/)), updatedAt: 0 };
+    }
+
+    return { blockedUserIds: [], updatedAt: 0 };
+  }
+
+  function createBasicAuth(username, password) {
+    const bytes = new TextEncoder().encode(`${username}:${password}`);
+    let binary = '';
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+    return `Basic ${window.btoa(binary)}`;
+  }
+
+  function getWebdavFileUrl(config) {
+    const baseUrl = config.url.replace(/\/+$/, '');
+    const directory = config.directory.replace(/^\/+|\/+$/g, '');
+    return `${baseUrl}/${directory ? `${directory}/` : ''}${SYNC_FILE_NAME}`;
+  }
+
+  function getWebdavDirectoryUrls(config) {
+    const directory = config.directory.replace(/^\/+|\/+$/g, '');
+    const urls = [];
+    let currentUrl = config.url.replace(/\/+$/, '');
+
+    for (const segment of directory.split('/').filter(Boolean)) {
+      currentUrl = `${currentUrl}/${segment}`;
+      urls.push(currentUrl);
+    }
+    return urls;
+  }
+
+  function requestWebdav(method, url, config, data = null) {
+    return new Promise((resolve, reject) => {
+      const headers = {};
+      if (config.username || config.password) {
+        headers.Authorization = createBasicAuth(config.username, config.password);
+      }
+      if (data !== null) {
+        headers['Content-Type'] = 'application/json; charset=UTF-8';
+      }
+
+      GM_xmlhttpRequest({
+        method: method,
+        url: url,
+        headers: headers,
+        data: data,
+        timeout: 15000,
+        onload: resolve,
+        onerror: function () { reject(new Error('WebDAV 请求失败')); },
+        ontimeout: function () { reject(new Error('WebDAV 请求超时')); }
+      });
+    });
+  }
+
+  async function ensureWebdavDirectory(config) {
+    for (const url of getWebdavDirectoryUrls(config)) {
+      const response = await requestWebdav('MKCOL', url, config);
+      if (![200, 201, 405].includes(response.status)) {
+        throw new Error(`创建 WebDAV 目录失败：HTTP ${response.status}`);
+      }
+    }
+  }
+
+  async function uploadWebdavBlockedUsers(config, userIds, updatedAt) {
+    const nextUpdatedAt = updatedAt || Date.now();
+    const payload = JSON.stringify({
+      version: 1,
+      updatedAt: nextUpdatedAt,
+      blockedUserIds: normalizeBlockedUserIds(userIds)
+    }, null, 2);
+
+    await ensureWebdavDirectory(config);
+    const response = await requestWebdav('PUT', getWebdavFileUrl(config), config, payload);
+    if (![200, 201, 204].includes(response.status)) {
+      throw new Error(`上传 WebDAV 屏蔽列表失败：HTTP ${response.status}`);
+    }
+    setLocalUpdatedAt(Math.max(getLocalUpdatedAt(), nextUpdatedAt));
+  }
+
+  function setWebdavStatus(text, isError = false) {
+    const status = document.getElementById(ENUMS_ELEMENT_ID.WEBDAV_STATUS);
+    if (status) {
+      status.textContent = text;
+      status.style.color = isError ? '#c33' : '#666';
+    }
+  }
+
+  function scheduleWebdavSync() {
+    window.clearTimeout(syncTimer);
+    syncTimer = window.setTimeout(function () {
+      syncTimer = 0;
+      syncWebdavBlockedUsers('change');
+    }, 400);
+  }
+
+  async function syncWebdavBlockedUsers(source = 'auto') {
+    const config = loadWebdavConfig();
+    if (!config.url) {
+      setWebdavStatus('未启用同步');
+      return;
+    }
+    if (isSyncing) {
+      hasPendingSync = true;
+      return;
+    }
+
+    isSyncing = true;
+    setWebdavStatus(source === 'manual' ? '正在同步...' : '正在自动同步...');
+    try {
+      const response = await requestWebdav('GET', getWebdavFileUrl(config), config);
+
+      if (response.status === 404) {
+        const localUserIds = getBlockedUserIds();
+        const localUpdatedAt = getLocalUpdatedAt();
+        const nextUpdatedAt = localUpdatedAt || Date.now();
+        await uploadWebdavBlockedUsers(config, localUserIds, nextUpdatedAt);
+        setWebdavStatus('已创建远端同步文件');
+        return;
+      }
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`读取 WebDAV 屏蔽列表失败：HTTP ${response.status}`);
+      }
+
+      const localUserIds = getBlockedUserIds();
+      const localUpdatedAt = getLocalUpdatedAt();
+      const remote = parseWebdavPayload(response.responseText);
+      if (!localUpdatedAt && remote.updatedAt) {
+        const mergedUserIds = normalizeBlockedUserIds([...remote.blockedUserIds, ...localUserIds]);
+        if (areBlockedUserIdsEqual(mergedUserIds, remote.blockedUserIds)) {
+          applyBlockedUserIds(remote.blockedUserIds);
+          setLocalUpdatedAt(remote.updatedAt);
+          setWebdavStatus('已应用远端屏蔽列表');
+        } else {
+          const nextUpdatedAt = Date.now();
+          applyBlockedUserIds(mergedUserIds);
+          await uploadWebdavBlockedUsers(config, mergedUserIds, nextUpdatedAt);
+          setWebdavStatus('已合并本地和远端屏蔽列表');
+        }
+      } else if (remote.updatedAt > localUpdatedAt) {
+        applyBlockedUserIds(remote.blockedUserIds);
+        setLocalUpdatedAt(remote.updatedAt);
+        setWebdavStatus('已应用远端屏蔽列表');
+      } else if (localUpdatedAt > remote.updatedAt) {
+        await uploadWebdavBlockedUsers(config, localUserIds, localUpdatedAt);
+        setWebdavStatus('已上传本地屏蔽列表');
+      } else if (!areBlockedUserIdsEqual(localUserIds, remote.blockedUserIds)) {
+        const mergedUserIds = normalizeBlockedUserIds([...remote.blockedUserIds, ...localUserIds]);
+        const nextUpdatedAt = Date.now();
+        applyBlockedUserIds(mergedUserIds);
+        await uploadWebdavBlockedUsers(config, mergedUserIds, nextUpdatedAt);
+        setWebdavStatus('已合并本地和远端屏蔽列表');
+      } else {
+        setWebdavStatus('屏蔽列表已同步');
+      }
+    } catch (e) {
+      console.warn('[zhihu-blocker-user] WebDAV 同步失败', e);
+      setWebdavStatus(e.message || 'WebDAV 同步失败', true);
+    } finally {
+      isSyncing = false;
+      if (hasPendingSync) {
+        hasPendingSync = false;
+        scheduleWebdavSync();
+      }
     }
   }
 
@@ -367,51 +746,67 @@
   }
 
   //同步知乎黑名单至脚本
-  let doSync = function (url) {
+  let doSync = function (url, hasChanges, complete) {
     try {
       GM_xmlhttpRequest({
         method: 'GET',
         url: url ? url : `https://www.zhihu.com/api/v3/settings/blocked_users?offset=0&limit=100`,
         onload: function (resp) {
-          let blockedUsers = JSON.parse(resp.response);
-          let { data, paging } = blockedUsers;
-          let nextUrl = new window.URL(paging.next);
-          for (const blockedUser of data) {
-            localStorage.setItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + blockedUser.id, 1);
-          }
-          if (!paging.is_end) {
-            let progress = Math.round(nextUrl.searchParams.get('offset') / paging.totals * 100);
-            console.log(`知乎黑名单用户同步中...${progress}%`)
+          try {
+            let blockedUsers = JSON.parse(resp.response);
+            let { data, paging } = blockedUsers;
+            let changed = Boolean(hasChanges);
+            for (const blockedUser of data) {
+              if (!localStorage.getItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + blockedUser.id)) {
+                changed = true;
+              }
+              localStorage.setItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + blockedUser.id, 1);
+            }
+            if (!paging.is_end) {
+              let nextUrl = new window.URL(paging.next);
+              let progress = Math.round(nextUrl.searchParams.get('offset') / paging.totals * 100);
+              console.log(`知乎黑名单用户同步中...${progress}%`)
 
-            //下一页
-            doSync(nextUrl.toString());
-          } else {
-            localStorage.setItem(ENUMS_STORAGE_KEY.SYNCED, 1);
-            console.log(`知乎黑名单用户同步中...100%`)
-            console.log(`知乎黑名单用户同步完成`)
+              //下一页
+              doSync(nextUrl.toString(), changed, complete);
+            } else {
+              localStorage.setItem(ENUMS_STORAGE_KEY.SYNCED, 1);
+              if (changed) {
+                markBlockedUsersChanged();
+              }
+              console.log(`知乎黑名单用户同步中...100%`)
+              console.log(`知乎黑名单用户同步完成`)
+              complete();
+            }
+          } catch (e) {
+            console.log('解析知乎黑名单失败', e);
+            complete();
           }
         },
         onerror: function (e) {
           console.log(e);
+          complete();
         }
       });
     } catch (e) {
       console.log("doSync error", e)
+      complete();
     }
   }
-  let syncBlockedUser = function () {
+  let syncBlockedUser = function (complete) {
     if ('www.zhihu.com' !== window.location.host) {
+      complete();
       return;
     }
 
     //已完成同步，无需再同步了
     let synced = localStorage.getItem(ENUMS_STORAGE_KEY.SYNCED);
     if (synced) {
+      complete();
       return;
     }
-    doSync();
+    doSync(undefined, false, complete);
   }
-  syncBlockedUser();
 
   //迁移localStorage中屏蔽的用户key，精简key前缀
   let migrateBlockUser = function () {
@@ -441,6 +836,7 @@
     //保存屏蔽userId
     let userId = e.target.getAttribute(ENUMS_ATTR.USER_ID);
     localStorage.setItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + userId, 1);
+    markBlockedUsersChanged();
 
     //隐藏用户内容
     hideBlockedUserContent(userId);
@@ -459,6 +855,7 @@
     //删除屏蔽userId
     let userId = e.target.getAttribute(ENUMS_ATTR.USER_ID);
     localStorage.removeItem(ENUMS_STORAGE_KEY.BLOCK_PREFIX + userId);
+    markBlockedUsersChanged();
 
     //显示用户内容
     showCancelUserContent(HIDE_USER_COMMENT_COMPONENT_WITH_ID_CLASS, USER_COMMENT_COMPONENT_CLASS, userId);
@@ -828,7 +1225,9 @@
         this.dialogContent = document.createElement('div')
         this.setStyle(this.dialogContent, {
           "padding": "15px",
-          "max-height": "400px"
+          "max-height": "320px",
+          "overflow-y": "auto",
+          "box-sizing": "border-box"
         })
         this.dialogContent.innerHTML = param.content;
         this.content.appendChild(this.dialogContent);
@@ -868,7 +1267,9 @@
         this.dialogContent = document.createElement('div')
         this.setStyle(this.dialogContent, {
           "padding": "15px",
-          "max-height": "400px"
+          "max-height": "320px",
+          "overflow-y": "auto",
+          "box-sizing": "border-box"
         })
         this.dialogContent.innerHTML = param.content;
         this.content.appendChild(this.dialogContent);
@@ -900,4 +1301,9 @@
       return popup;
     })()
   })()
+
+  initializeBlockedUsersStorage();
+  syncBlockedUser(function () {
+    syncWebdavBlockedUsers('startup');
+  });
 })();
