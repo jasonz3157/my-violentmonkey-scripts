@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab Runner 汇总
 // @namespace    my-violentmonkey-scripts
-// @version      0.3.1
+// @version      0.3.2
 // @description  在 GitLab 管理员 Runner 页面增加作业状态、版本统计及筛选。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -96,6 +96,7 @@
       }
 
       .vm-runner-summary-filter {
+        border-radius: var(--gl-border-radius-lg, 0.5rem);
         cursor: pointer;
         outline-offset: 0.25rem;
       }
@@ -104,6 +105,50 @@
       .vm-runner-summary-filter:focus-visible,
       .vm-runner-summary-filter[aria-pressed="true"] {
         outline: 2px solid var(--gl-focus-ring-outer-color, #1f75cb);
+      }
+
+      .vm-runner-online-badge {
+        background-color: transparent !important;
+        border: 1px solid var(--gl-status-success-border-color, #108548) !important;
+        box-shadow: none !important;
+        color: var(--gl-status-success-text-color, #0a7f42) !important;
+      }
+
+      .vm-runner-online-badge .gl-badge-icon,
+      .vm-runner-online-badge svg {
+        display: none !important;
+      }
+
+      .vm-runner-job-badge {
+        align-items: center;
+        border-color: transparent !important;
+        box-shadow: none !important;
+        display: inline-flex !important;
+        gap: 0.5rem;
+      }
+
+      .vm-runner-job-badge::before {
+        background-color: currentColor;
+        border-radius: 50%;
+        content: '';
+        flex: none;
+        height: 1rem;
+        width: 1rem;
+      }
+
+      .vm-runner-job-badge .gl-badge-icon,
+      .vm-runner-job-badge svg {
+        display: none !important;
+      }
+
+      .vm-runner-running-badge {
+        background-color: var(--gl-status-info-background-color, #cbe2f9) !important;
+        color: var(--gl-status-info-text-color, #0b5cad) !important;
+      }
+
+      .vm-runner-idle-badge {
+        background-color: var(--gl-status-neutral-background-color, #ececef) !important;
+        color: var(--gl-text-color-default, #333238) !important;
       }
 
       .vm-runner-job-status-filtered {
@@ -222,12 +267,59 @@
     return versionMatch ? normalizeVersion(versionMatch[1]) : UNKNOWN_VERSION;
   }
 
+  function getRowStatusBadge(row, status) {
+    const statusElement = [...row.querySelectorAll('span')].find(
+      (element) => element.textContent.trim().toUpperCase() === status,
+    );
+
+    return (
+      statusElement?.closest('.gl-badge') ??
+      statusElement?.closest('.badge') ??
+      statusElement
+    );
+  }
+
+  function updateRowStatusBadges(row) {
+    const onlineBadge = getRowStatusBadge(row, 'ONLINE');
+    const idleBadge = getRowStatusBadge(row, 'IDLE');
+    const runningBadge = getRowStatusBadge(row, 'RUNNING');
+
+    if (onlineBadge) {
+      onlineBadge.classList.remove(
+        'vm-runner-job-badge',
+        'vm-runner-idle-badge',
+        'vm-runner-running-badge',
+      );
+      onlineBadge.classList.add('gl-badge-outlined', 'vm-runner-online-badge');
+    }
+
+    for (const [badge, statusClass] of [
+      [idleBadge, 'vm-runner-idle-badge'],
+      [runningBadge, 'vm-runner-running-badge'],
+    ]) {
+      if (!badge) {
+        continue;
+      }
+
+      badge.classList.remove('gl-badge-outlined');
+      badge.classList.remove(
+        'vm-runner-online-badge',
+        statusClass === 'vm-runner-idle-badge'
+          ? 'vm-runner-running-badge'
+          : 'vm-runner-idle-badge',
+      );
+      badge.classList.add('vm-runner-job-badge', statusClass);
+    }
+  }
+
   function applyRunnerFilter() {
     const rows = document.querySelectorAll(
       '[data-testid="runner-list"] tr[data-testid^="runner-row-"]',
     );
 
     for (const row of rows) {
+      updateRowStatusBadges(row);
+
       const shouldHide =
         (activeJobStatusFilter && getRowJobStatus(row) !== activeJobStatusFilter) ||
         (activeVersionFilter && getRowVersion(row) !== activeVersionFilter);
