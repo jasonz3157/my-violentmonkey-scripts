@@ -95,26 +95,14 @@
         color: var(--gl-status-info-icon-color, #1f75cb) !important;
       }
 
-      .vm-runner-job-status-filter {
-        border-radius: 50%;
-        cursor: pointer;
-        outline-offset: 2px;
-      }
-
-      .vm-runner-job-status-filter:hover,
-      .vm-runner-job-status-filter:focus-visible,
-      .vm-runner-job-status-filter[aria-pressed="true"] {
-        outline: 2px solid currentColor;
-      }
-
-      .vm-runner-version-filter {
+      .vm-runner-summary-filter {
         cursor: pointer;
         outline-offset: 0.25rem;
       }
 
-      .vm-runner-version-filter:hover,
-      .vm-runner-version-filter:focus-visible,
-      .vm-runner-version-filter[aria-pressed="true"] {
+      .vm-runner-summary-filter:hover,
+      .vm-runner-summary-filter:focus-visible,
+      .vm-runner-summary-filter[aria-pressed="true"] {
         outline: 2px solid var(--gl-focus-ring-outer-color, #1f75cb);
       }
 
@@ -249,19 +237,19 @@
   }
 
   function updateFilterControls() {
-    const icons = document.querySelectorAll('[data-job-status-filter]');
+    const jobStatusStats = document.querySelectorAll('[data-job-status-filter]');
 
-    for (const icon of icons) {
-      const status = icon.dataset.jobStatusFilter;
+    for (const stat of jobStatusStats) {
+      const status = stat.dataset.jobStatusFilter;
       const isActive = status === activeJobStatusFilter;
       const label = status === 'RUNNING' ? 'Running' : 'Idle';
 
-      icon.setAttribute('aria-pressed', String(isActive));
-      icon.setAttribute(
+      stat.setAttribute('aria-pressed', String(isActive));
+      stat.setAttribute(
         'aria-label',
         isActive ? `取消 ${label} 筛选` : `只显示 ${label} runner`,
       );
-      icon.setAttribute(
+      stat.setAttribute(
         'title',
         isActive ? `取消 ${label} 筛选` : `只显示 ${label} runner`,
       );
@@ -292,25 +280,16 @@
     applyRunnerFilter();
   }
 
-  function makeIconFilterable(stat, status) {
-    const icon = stat.querySelector('.vm-runner-job-status-icon');
-
-    if (!icon) {
-      return;
-    }
-
-    icon.classList.add('vm-runner-job-status-filter');
-    icon.dataset.jobStatusFilter = status;
-    icon.setAttribute('role', 'button');
-    icon.setAttribute('tabindex', '0');
-    icon.setAttribute('focusable', 'true');
-    icon.removeAttribute('aria-hidden');
-    icon.addEventListener('click', (event) => {
+  function makeStatFilterable(stat, status) {
+    stat.classList.add('vm-runner-summary-filter');
+    stat.dataset.jobStatusFilter = status;
+    stat.setAttribute('role', 'button');
+    stat.setAttribute('tabindex', '0');
+    stat.addEventListener('click', (event) => {
       event.preventDefault();
-      event.stopPropagation();
       toggleRunnerFilter(status);
     });
-    icon.addEventListener('keydown', (event) => {
+    stat.addEventListener('keydown', (event) => {
       if (['Enter', ' '].includes(event.key)) {
         event.preventDefault();
         toggleRunnerFilter(status);
@@ -351,7 +330,7 @@
     setTextIfChanged(valueElement, formatCount(count));
 
     setIcon(stat, iconName);
-    makeIconFilterable(stat, id === RUNNING_STAT_ID ? 'RUNNING' : 'IDLE');
+    makeStatFilterable(stat, id === RUNNING_STAT_ID ? 'RUNNING' : 'IDLE');
 
     return stat;
   }
@@ -366,7 +345,7 @@
 
     stat.removeAttribute('id');
     stat.removeAttribute('data-testid');
-    stat.classList.add(VERSION_STAT_CLASS, 'vm-runner-version-filter');
+    stat.classList.add(VERSION_STAT_CLASS, 'vm-runner-summary-filter');
     stat.dataset.runnerVersionFilter = version;
     stat.setAttribute('role', 'button');
     stat.setAttribute('tabindex', '0');
