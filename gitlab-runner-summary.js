@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name         GitLab Runner 作业状态统计
+// @name         GitLab Runner 汇总
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.0
-// @description  在 GitLab 管理员 Runner 页面增加 Running 和 Idle 状态统计及筛选。
+// @version      0.3.0
+// @description  在 GitLab 管理员 Runner 页面增加作业状态、版本统计及筛选。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
 // @grant        none
 // @run-at       document-start
 // @license      GPL-3.0
-// @downloadURL  https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/gitlab-runner-job-status-summary.js
-// @updateURL    https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/gitlab-runner-job-status-summary.js
+// @downloadURL  https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/gitlab-runner-summary.js
+// @updateURL    https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/gitlab-runner-summary.js
 // ==/UserScript==
 
 (function () {
@@ -30,11 +30,18 @@
   const BUILT_IN_STAT_TITLES = new Set(['Online', 'Offline', 'Stale']);
   const SUMMARY_ID = 'vm-runner-job-status-summary';
   const DIVIDER_ID = 'vm-runner-job-status-divider';
+  const VERSION_DIVIDER_ID = 'vm-runner-version-divider';
   const IDLE_STAT_ID = 'vm-runner-job-status-idle';
   const RUNNING_STAT_ID = 'vm-runner-job-status-running';
+  const VERSION_STAT_CLASS = 'vm-runner-version-stat';
+  const UNKNOWN_VERSION = 'Unknown';
   const RUNNER_TYPES = new Set(['INSTANCE_TYPE', 'GROUP_TYPE', 'PROJECT_TYPE']);
-  const RUNNER_STATUSES_QUERY = `
-    query getRunnerJobExecutionStatuses(
+  const VERSION_COLLATOR = new Intl.Collator(undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+  const RUNNER_SUMMARY_QUERY = `
+    query getRunnerSummary(
       $first: Int!
       $after: String
       $type: CiRunnerType
@@ -43,6 +50,7 @@
         nodes {
           id
           jobExecutionStatus
+          version
         }
         pageInfo {
           endCursor
@@ -54,8 +62,11 @@
 
   let currentCounts = { idle: null, running: null };
   let currentRunnerStatuses = new Map();
+  let currentVersionCounts = new Map();
+  let currentRunnerVersions = new Map();
   let currentRunnerType = null;
   let activeJobStatusFilter = null;
+  let activeVersionFilter = null;
   let refreshTimer = 0;
   let refreshPromise = null;
 
@@ -63,7 +74,8 @@
     const style = document.createElement('style');
 
     style.textContent = `
-      #${DIVIDER_ID} {
+      #${DIVIDER_ID},
+      #${VERSION_DIVIDER_ID} {
         align-self: stretch;
         border-left: 1px solid var(--gl-border-color-default, #bfbfc3);
         margin: 0 0.75rem;
@@ -93,6 +105,17 @@
       .vm-runner-job-status-filter:focus-visible,
       .vm-runner-job-status-filter[aria-pressed="true"] {
         outline: 2px solid currentColor;
+      }
+
+      .vm-runner-version-filter {
+        cursor: pointer;
+        outline-offset: 0.25rem;
+      }
+
+      .vm-runner-version-filter:hover,
+      .vm-runner-version-filter:focus-visible,
+      .vm-runner-version-filter[aria-pressed="true"] {
+        outline: 2px solid var(--gl-focus-ring-outer-color, #1f75cb);
       }
 
       .vm-runner-job-status-filtered {
@@ -174,6 +197,10 @@
     return String(graphqlId).split('/').at(-1);
   }
 
+  function normalizeVersion(version) {
+    return String(version ?? '').trim() || UNKNOWN_VERSION;
+  }
+
   function getRowJobStatus(row) {
     const rowTestId = row.dataset.testid ?? '';
     const runnerId = rowTestId.replace(/^runner-row-/, '');
@@ -194,6 +221,19 @@
     return null;
   }
 
+  function getRowVersion(row) {
+    const rowTestId = row.dataset.testid ?? '';
+    const runnerId = rowTestId.replace(/^runner-row-/, '');
+
+    if (currentRunnerVersions.has(runnerId)) {
+      return currentRunnerVersions.get(runnerId);
+    }
+
+    const versionMatch = row.textContent.match(/\bVersion\s+([^\s·]+)/i);
+
+    return versionMatch ? normalizeVersion(versionMatch[1]) : UNKNOWN_VERSION;
+  }
+
   function applyRunnerFilter() {
     const rows = document.querySelectorAll(
       '[data-testid="runner-list"] tr[data-testid^="runner-row-"]',
@@ -201,7 +241,8 @@
 
     for (const row of rows) {
       const shouldHide =
-        activeJobStatusFilter && getRowJobStatus(row) !== activeJobStatusFilter;
+        (activeJobStatusFilter && getRowJobStatus(row) !== activeJobStatusFilter) ||
+        (activeVersionFilter && getRowVersion(row) !== activeVersionFilter);
 
       row.classList.toggle('vm-runner-job-status-filtered', Boolean(shouldHide));
     }
@@ -225,10 +266,28 @@
         isActive ? `取消 ${label} 筛选` : `只显示 ${label} runner`,
       );
     }
+
+    const versionStats = document.querySelectorAll('[data-runner-version-filter]');
+
+    for (const stat of versionStats) {
+      const version = stat.dataset.runnerVersionFilter;
+      const isActive = version === activeVersionFilter;
+      const action = isActive ? '取消版本筛选' : `只显示 ${version} 版本的 runner`;
+
+      stat.setAttribute('aria-pressed', String(isActive));
+      stat.setAttribute('aria-label', action);
+      stat.setAttribute('title', action);
+    }
   }
 
   function toggleRunnerFilter(status) {
     activeJobStatusFilter = activeJobStatusFilter === status ? null : status;
+    updateFilterControls();
+    applyRunnerFilter();
+  }
+
+  function toggleVersionFilter(version) {
+    activeVersionFilter = activeVersionFilter === version ? null : version;
     updateFilterControls();
     applyRunnerFilter();
   }
@@ -297,6 +356,86 @@
     return stat;
   }
 
+  function createVersionStat(source, version, count) {
+    const stat = source.cloneNode(true);
+    const titleElement = getTitleElement(stat);
+    const valueElement = getValueElement(stat);
+    const icon =
+      stat.querySelector('[data-testid="meta-icon"]') ??
+      [...stat.querySelectorAll('svg')].at(-1);
+
+    stat.removeAttribute('id');
+    stat.removeAttribute('data-testid');
+    stat.classList.add(VERSION_STAT_CLASS, 'vm-runner-version-filter');
+    stat.dataset.runnerVersionFilter = version;
+    stat.setAttribute('role', 'button');
+    stat.setAttribute('tabindex', '0');
+
+    setTextIfChanged(titleElement, version);
+    setTextIfChanged(valueElement, formatCount(count));
+    icon?.remove();
+
+    stat.addEventListener('click', (event) => {
+      event.preventDefault();
+      toggleVersionFilter(version);
+    });
+    stat.addEventListener('keydown', (event) => {
+      if (['Enter', ' '].includes(event.key)) {
+        event.preventDefault();
+        toggleVersionFilter(version);
+      }
+    });
+
+    return stat;
+  }
+
+  function getSortedVersionCounts() {
+    return [...currentVersionCounts.entries()].sort(([left], [right]) => {
+      if (left === right) {
+        return 0;
+      }
+
+      if (left === UNKNOWN_VERSION) {
+        return 1;
+      }
+
+      if (right === UNKNOWN_VERSION) {
+        return -1;
+      }
+
+      return VERSION_COLLATOR.compare(right, left);
+    });
+  }
+
+  function updateVersionSummary(summary, source) {
+    const expectedVersionCounts = getSortedVersionCounts();
+    const renderedStats = [...summary.querySelectorAll(`.${VERSION_STAT_CLASS}`)];
+    const canReuseRenderedStats =
+      renderedStats.length === expectedVersionCounts.length &&
+      renderedStats.every(
+        (stat, index) =>
+          stat.dataset.runnerVersionFilter === expectedVersionCounts[index][0],
+      );
+
+    if (canReuseRenderedStats) {
+      for (const [index, [, count]] of expectedVersionCounts.entries()) {
+        setTextIfChanged(getValueElement(renderedStats[index]), formatCount(count));
+      }
+
+      return;
+    }
+
+    for (const stat of renderedStats) {
+      stat.remove();
+    }
+
+    summary.append(
+      ...expectedVersionCounts.map(([version, count]) =>
+        createVersionStat(source, version, count),
+      ),
+    );
+  }
+
   function updateRenderedCounts() {
     const idleStat = document.getElementById(IDLE_STAT_ID);
     const runningStat = document.getElementById(RUNNING_STAT_ID);
@@ -311,6 +450,7 @@
     const container = lastBuiltInStat?.parentElement;
     const onlineStat = builtInStats.find((stat) => getStatTitle(stat) === 'Online');
     const offlineStat = builtInStats.find((stat) => getStatTitle(stat) === 'Offline');
+    const versionStatSource = onlineStat ?? builtInStats[0];
 
     if (!container) {
       return;
@@ -342,7 +482,25 @@
           'status-waiting',
         ),
       );
+
+      const versionDivider = document.createElement('div');
+
+      versionDivider.id = VERSION_DIVIDER_ID;
+      versionDivider.setAttribute('aria-hidden', 'true');
+      summary.append(versionDivider);
     }
+
+    let versionDivider = summary.querySelector(`#${VERSION_DIVIDER_ID}`);
+
+    if (!versionDivider) {
+      versionDivider = document.createElement('div');
+      versionDivider.id = VERSION_DIVIDER_ID;
+      versionDivider.setAttribute('aria-hidden', 'true');
+      summary.append(versionDivider);
+    }
+
+    updateVersionSummary(summary, versionStatSource);
+    versionDivider.hidden = currentVersionCounts.size === 0;
 
     if (
       divider.parentElement !== container ||
@@ -364,7 +522,7 @@
     return RUNNER_TYPES.has(runnerType) ? runnerType : null;
   }
 
-  async function requestRunnerStatuses(type, after = null) {
+  async function requestRunnerSummary(type, after = null) {
     const headers = {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -380,7 +538,7 @@
       credentials: 'same-origin',
       headers,
       body: JSON.stringify({
-        query: RUNNER_STATUSES_QUERY,
+        query: RUNNER_SUMMARY_QUERY,
         variables: {
           first: PAGE_SIZE,
           after,
@@ -406,18 +564,24 @@
     return result.data.runners;
   }
 
-  async function loadCounts(type) {
+  async function loadSummary(type) {
     const counts = { idle: 0, running: 0 };
     const statuses = new Map();
+    const versionCounts = new Map();
+    const versions = new Map();
     let after = null;
 
     do {
-      const runners = await requestRunnerStatuses(type, after);
+      const runners = await requestRunnerSummary(type, after);
 
       for (const runner of runners.nodes ?? []) {
         const status = normalizeJobStatus(runner.jobExecutionStatus);
+        const version = normalizeVersion(runner.version);
+        const runnerId = getRunnerId(runner.id);
 
-        statuses.set(getRunnerId(runner.id), status);
+        statuses.set(runnerId, status);
+        versions.set(runnerId, version);
+        versionCounts.set(version, (versionCounts.get(version) ?? 0) + 1);
 
         if (status === 'IDLE') {
           counts.idle += 1;
@@ -433,33 +597,40 @@
       after = runners.pageInfo.endCursor;
     } while (after);
 
-    return { counts, statuses };
+    return { counts, statuses, versionCounts, versions };
   }
 
-  async function refreshCounts() {
+  async function refreshSummary() {
     if (refreshPromise || document.hidden) {
       return refreshPromise;
     }
 
     const runnerType = getRunnerType();
     currentRunnerType = runnerType;
-    refreshPromise = loadCounts(runnerType)
-      .then(({ counts, statuses }) => {
+    refreshPromise = loadSummary(runnerType)
+      .then(({ counts, statuses, versionCounts, versions }) => {
         if (runnerType === getRunnerType()) {
           currentCounts = counts;
           currentRunnerStatuses = statuses;
-          updateRenderedCounts();
+          currentVersionCounts = versionCounts;
+          currentRunnerVersions = versions;
+
+          if (activeVersionFilter && !currentVersionCounts.has(activeVersionFilter)) {
+            activeVersionFilter = null;
+          }
+
+          ensureSummary();
           applyRunnerFilter();
         }
       })
       .catch((error) => {
-        console.error('[GitLab Runner 作业状态统计]', error);
+        console.error('[GitLab Runner 汇总]', error);
       })
       .finally(() => {
         refreshPromise = null;
 
         if (runnerType !== getRunnerType()) {
-          void refreshCounts();
+          void refreshSummary();
         }
       });
 
@@ -470,15 +641,17 @@
     if (getRunnerType() !== currentRunnerType) {
       currentCounts = { idle: null, running: null };
       currentRunnerStatuses = new Map();
-      updateRenderedCounts();
+      currentVersionCounts = new Map();
+      currentRunnerVersions = new Map();
+      ensureSummary();
       applyRunnerFilter();
-      void refreshCounts();
+      void refreshSummary();
     }
   }
 
   function start() {
     ensureSummary();
-    void refreshCounts();
+    void refreshSummary();
 
     const observer = new MutationObserver(() => {
       ensureSummary();
@@ -493,14 +666,14 @@
 
     refreshTimer = window.setInterval(() => {
       refreshIfRunnerTypeChanged();
-      void refreshCounts();
+      void refreshSummary();
     }, REFRESH_INTERVAL_MS);
 
     window.addEventListener('popstate', refreshIfRunnerTypeChanged);
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         refreshIfRunnerTypeChanged();
-        void refreshCounts();
+        void refreshSummary();
       }
     });
     window.addEventListener(
