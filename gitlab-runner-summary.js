@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab Runner 汇总
 // @namespace    my-violentmonkey-scripts
-// @version      0.3.4
+// @version      0.3.5
 // @description  在 GitLab 管理员 Runner 页面增加作业状态、版本统计及筛选。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -120,10 +120,8 @@
       }
 
       .gl-badge.vm-runner-job-badge {
-        align-items: center;
         border: 1px solid transparent !important;
         box-shadow: none !important;
-        display: inline-flex !important;
       }
 
       .vm-runner-job-badge .gl-badge-icon,
