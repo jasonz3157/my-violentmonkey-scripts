@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab Runner 汇总
 // @namespace    my-violentmonkey-scripts
-// @version      0.3.2
+// @version      0.3.3
 // @description  在 GitLab 管理员 Runner 页面增加作业状态、版本统计及筛选。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -96,18 +96,18 @@
       }
 
       .vm-runner-summary-filter {
-        border-radius: var(--gl-border-radius-lg, 0.5rem);
+        border-radius: var(--gl-border-radius-base, 0.25rem) !important;
         cursor: pointer;
-        outline-offset: 0.25rem;
       }
 
       .vm-runner-summary-filter:hover,
       .vm-runner-summary-filter:focus-visible,
       .vm-runner-summary-filter[aria-pressed="true"] {
-        outline: 2px solid var(--gl-focus-ring-outer-color, #1f75cb);
+        box-shadow: inset 0 0 0 2px var(--gl-focus-ring-outer-color, #1f75cb);
+        outline: none;
       }
 
-      .vm-runner-online-badge {
+      .gl-badge.vm-runner-online-badge {
         background-color: transparent !important;
         border: 1px solid var(--gl-status-success-border-color, #108548) !important;
         box-shadow: none !important;
@@ -119,7 +119,7 @@
         display: none !important;
       }
 
-      .vm-runner-job-badge {
+      .gl-badge.vm-runner-job-badge {
         align-items: center;
         border-color: transparent !important;
         box-shadow: none !important;
@@ -141,14 +141,20 @@
         display: none !important;
       }
 
-      .vm-runner-running-badge {
+      .vm-runner-job-badge.vm-runner-running-badge {
         background-color: var(--gl-status-info-background-color, #cbe2f9) !important;
         color: var(--gl-status-info-text-color, #0b5cad) !important;
       }
 
-      .vm-runner-idle-badge {
+      .vm-runner-job-badge.vm-runner-idle-badge {
         background-color: var(--gl-status-neutral-background-color, #ececef) !important;
         color: var(--gl-text-color-default, #333238) !important;
+      }
+
+      .vm-runner-idle-badge::before {
+        background-color: transparent;
+        border: 0.1875rem solid var(--gl-text-color-disabled, #737278);
+        box-sizing: border-box;
       }
 
       .vm-runner-job-status-filtered {
@@ -268,14 +274,8 @@
   }
 
   function getRowStatusBadge(row, status) {
-    const statusElement = [...row.querySelectorAll('span')].find(
+    return [...row.querySelectorAll('.gl-badge, .badge')].find(
       (element) => element.textContent.trim().toUpperCase() === status,
-    );
-
-    return (
-      statusElement?.closest('.gl-badge') ??
-      statusElement?.closest('.badge') ??
-      statusElement
     );
   }
 
@@ -301,8 +301,15 @@
         continue;
       }
 
-      badge.classList.remove('gl-badge-outlined');
       badge.classList.remove(
+        'gl-badge-outlined',
+        'gl-bg-transparent',
+        'gl-bg-transparent!',
+        'gl-border',
+        'gl-border-gray-500',
+        'gl-border-gray-500!',
+        'gl-text-gray-700',
+        'gl-text-gray-700!',
         'vm-runner-online-badge',
         statusClass === 'vm-runner-idle-badge'
           ? 'vm-runner-running-badge'
