@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎屏蔽用户评论
 // @namespace    jasonz3157
-// @version      0.12
+// @version      0.13
 // @description  知乎屏蔽指定用户，将他的评论和回答隐藏。
 // @author       jasonz3157
 // @match        *://*.zhihu.com/*
@@ -1047,16 +1047,24 @@
   }
 
   let appendClickBtnByClassName = function (componentClassName) {
-    //元素过滤
-    let components = document.querySelectorAll(`.${componentClassName}:not(.${BTN_APPENDED_COMPONENT_CLASS})`);
+    let components = document.querySelectorAll(`.${componentClassName}`);
     if (components.length > 0) {
       for (let i = 0; i < components.length; i++) {
         let component = components[i];
-        if (component.getElementsByClassName(BTN_GROUP_CLASS).length === 0) {
+        let buttons = Array.from(component.children).filter(child => child.classList.contains(BTN_GROUP_CLASS));
+        if (buttons.length === 0) {
           //追加屏蔽按钮
           appendBtn(component, ENUMS_BLOCK_BTN_TYPE.BLOCK);
           //追加取消按钮
           appendBtn(component, ENUMS_BLOCK_BTN_TYPE.CANCEL);
+          buttons = Array.from(component.children).filter(child => child.classList.contains(BTN_GROUP_CLASS));
+        }
+
+        //知乎可能在按钮创建后异步插入用户名, 需持续校正按钮到用户名和徽章之后.
+        if (buttons.length > 0 && buttons[buttons.length - 1] !== component.lastElementChild) {
+          for (let button of buttons) {
+            component.appendChild(button);
+          }
         }
       }
     }
