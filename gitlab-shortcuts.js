@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab 快捷入口
 // @namespace    my-violentmonkey-scripts
-// @version      0.4.1
+// @version      0.4.2
 // @description  在 GitLab 左侧栏顶部添加常用页面快捷入口，并隐藏 Create new 按钮。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -19,12 +19,6 @@
   const CREATE_NEW_MENU_SELECTOR = '[data-testid="new-menu-toggle"]';
   const XLINK_NAMESPACE = 'http://www.w3.org/1999/xlink';
   const SHORTCUTS = [
-    {
-      id: 'vm-gitlab-admin-shortcut',
-      href: '/admin',
-      label: 'Admin',
-      icon: 'admin',
-    },
     {
       id: 'vm-gitlab-runners-shortcut',
       href: '/admin/runners',

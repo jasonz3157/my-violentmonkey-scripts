@@ -7,7 +7,7 @@
 将 GitHub 页面中时间元素的 tooltip 日期时间改为本地时区格式，例如 `2026-05-13 15:00:00 +08:00`。
 
 ## `gitlab-shortcuts.js`
-在 GitLab 左侧栏顶部添加 Admin、Runners 和 DBA 页面快捷入口，并隐藏 Create new 按钮。
+在 GitLab 左侧栏顶部添加 Runners 和 DBA 页面快捷入口，并隐藏 Create new 按钮。
 
 ## `gitlab-runner-summary.js`
 在 GitLab 管理员 Runner 页面原有状态统计右侧增加 Running、Idle、Paused 状态和 Runner 版本统计，支持按状态、版本筛选 runner。
