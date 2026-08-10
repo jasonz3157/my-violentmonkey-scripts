@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab Runner 汇总
 // @namespace    my-violentmonkey-scripts
-// @version      0.3.5
+// @version      0.4.0
 // @description  在 GitLab 管理员 Runner 页面增加作业状态、版本统计及筛选。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -32,10 +32,16 @@
   const DIVIDER_ID = 'vm-runner-job-status-divider';
   const VERSION_DIVIDER_ID = 'vm-runner-version-divider';
   const IDLE_STAT_ID = 'vm-runner-job-status-idle';
+  const PAUSED_STAT_ID = 'vm-runner-status-paused';
   const RUNNING_STAT_ID = 'vm-runner-job-status-running';
   const VERSION_STAT_CLASS = 'vm-runner-version-stat';
   const UNKNOWN_VERSION = 'Unknown';
   const RUNNER_TYPES = new Set(['INSTANCE_TYPE', 'GROUP_TYPE', 'PROJECT_TYPE']);
+  const STATUS_LABELS = {
+    IDLE: 'Idle',
+    PAUSED: 'Paused',
+    RUNNING: 'Running',
+  };
   const VERSION_COLLATOR = new Intl.Collator(undefined, {
     numeric: true,
     sensitivity: 'base',
@@ -50,6 +56,7 @@
         nodes {
           id
           jobExecutionStatus
+          paused
           version
         }
         pageInfo {
@@ -60,12 +67,13 @@
     }
   `;
 
-  let currentCounts = { idle: null, running: null };
+  let currentCounts = { idle: null, paused: null, running: null };
+  let currentRunnerPausedStates = new Map();
   let currentRunnerStatuses = new Map();
   let currentVersionCounts = new Map();
   let currentRunnerVersions = new Map();
   let currentRunnerType = null;
-  let activeJobStatusFilter = null;
+  let activeStatusFilter = null;
   let activeVersionFilter = null;
   let refreshTimer = 0;
   let refreshPromise = null;
@@ -93,6 +101,11 @@
       #${RUNNING_STAT_ID} [data-testid="meta-icon"],
       #${RUNNING_STAT_ID} .vm-runner-job-status-icon {
         color: var(--gl-status-info-icon-color, #1f75cb) !important;
+      }
+
+      #${PAUSED_STAT_ID} [data-testid="meta-icon"],
+      #${PAUSED_STAT_ID} .vm-runner-job-status-icon {
+        color: var(--gl-status-warning-icon-color, #ab6100) !important;
       }
 
       .vm-runner-summary-filter {
@@ -261,6 +274,17 @@
     );
   }
 
+  function getRowPausedState(row) {
+    const rowTestId = row.dataset.testid ?? '';
+    const runnerId = rowTestId.replace(/^runner-row-/, '');
+
+    if (currentRunnerPausedStates.has(runnerId)) {
+      return currentRunnerPausedStates.get(runnerId);
+    }
+
+    return Boolean(getRowStatusBadge(row, 'PAUSED'));
+  }
+
   function updateRowStatusBadges(row) {
     const onlineBadge = getRowStatusBadge(row, 'ONLINE');
     const idleBadge = getRowStatusBadge(row, 'IDLE');
@@ -309,8 +333,12 @@
     for (const row of rows) {
       updateRowStatusBadges(row);
 
+      const statusDoesNotMatch =
+        activeStatusFilter === 'PAUSED'
+          ? !getRowPausedState(row)
+          : activeStatusFilter && getRowJobStatus(row) !== activeStatusFilter;
       const shouldHide =
-        (activeJobStatusFilter && getRowJobStatus(row) !== activeJobStatusFilter) ||
+        statusDoesNotMatch ||
         (activeVersionFilter && getRowVersion(row) !== activeVersionFilter);
 
       row.classList.toggle('vm-runner-job-status-filtered', Boolean(shouldHide));
@@ -318,12 +346,12 @@
   }
 
   function updateFilterControls() {
-    const jobStatusStats = document.querySelectorAll('[data-job-status-filter]');
+    const statusStats = document.querySelectorAll('[data-runner-status-filter]');
 
-    for (const stat of jobStatusStats) {
-      const status = stat.dataset.jobStatusFilter;
-      const isActive = status === activeJobStatusFilter;
-      const label = status === 'RUNNING' ? 'Running' : 'Idle';
+    for (const stat of statusStats) {
+      const status = stat.dataset.runnerStatusFilter;
+      const isActive = status === activeStatusFilter;
+      const label = STATUS_LABELS[status] ?? status;
 
       stat.setAttribute('aria-pressed', String(isActive));
       stat.setAttribute(
@@ -350,7 +378,7 @@
   }
 
   function toggleRunnerFilter(status) {
-    activeJobStatusFilter = activeJobStatusFilter === status ? null : status;
+    activeStatusFilter = activeStatusFilter === status ? null : status;
     updateFilterControls();
     applyRunnerFilter();
   }
@@ -363,7 +391,7 @@
 
   function makeStatFilterable(stat, status) {
     stat.classList.add('vm-runner-summary-filter');
-    stat.dataset.jobStatusFilter = status;
+    stat.dataset.runnerStatusFilter = status;
     stat.setAttribute('role', 'button');
     stat.setAttribute('tabindex', '0');
     stat.addEventListener('click', (event) => {
@@ -399,7 +427,7 @@
     );
   }
 
-  function createStat(source, id, title, count, iconName) {
+  function createStat(source, id, title, count, iconName, filterStatus) {
     const stat = source.cloneNode(true);
     const titleElement = getTitleElement(stat);
     const valueElement = getValueElement(stat);
@@ -411,9 +439,35 @@
     setTextIfChanged(valueElement, formatCount(count));
 
     setIcon(stat, iconName);
-    makeStatFilterable(stat, id === RUNNING_STAT_ID ? 'RUNNING' : 'IDLE');
+    makeStatFilterable(stat, filterStatus);
 
     return stat;
+  }
+
+  function updatePausedSummary(summary, source, versionDivider) {
+    let pausedStat = summary.querySelector(`#${PAUSED_STAT_ID}`);
+
+    if (!(currentCounts.paused > 0)) {
+      pausedStat?.remove();
+      return;
+    }
+
+    if (!pausedStat) {
+      pausedStat = createStat(
+        source,
+        PAUSED_STAT_ID,
+        'Paused',
+        currentCounts.paused,
+        'status-paused',
+        'PAUSED',
+      );
+    }
+
+    setTextIfChanged(getValueElement(pausedStat), formatCount(currentCounts.paused));
+
+    if (pausedStat.nextElementSibling !== versionDivider) {
+      versionDivider.before(pausedStat);
+    }
   }
 
   function createVersionStat(source, version, count) {
@@ -499,9 +553,11 @@
   function updateRenderedCounts() {
     const idleStat = document.getElementById(IDLE_STAT_ID);
     const runningStat = document.getElementById(RUNNING_STAT_ID);
+    const pausedStat = document.getElementById(PAUSED_STAT_ID);
 
     setTextIfChanged(getValueElement(idleStat), formatCount(currentCounts.idle));
     setTextIfChanged(getValueElement(runningStat), formatCount(currentCounts.running));
+    setTextIfChanged(getValueElement(pausedStat), formatCount(currentCounts.paused));
   }
 
   function ensureSummary() {
@@ -510,7 +566,9 @@
     const container = lastBuiltInStat?.parentElement;
     const onlineStat = builtInStats.find((stat) => getStatTitle(stat) === 'Online');
     const offlineStat = builtInStats.find((stat) => getStatTitle(stat) === 'Offline');
+    const staleStat = builtInStats.find((stat) => getStatTitle(stat) === 'Stale');
     const versionStatSource = onlineStat ?? builtInStats[0];
+    const pausedStatSource = staleStat ?? versionStatSource;
 
     if (!container) {
       return;
@@ -533,6 +591,7 @@
           'Running',
           currentCounts.running,
           'status-active',
+          'RUNNING',
         ),
         createStat(
           offlineStat ?? builtInStats[0],
@@ -540,6 +599,7 @@
           'Idle',
           currentCounts.idle,
           'status-waiting',
+          'IDLE',
         ),
       );
 
@@ -559,6 +619,7 @@
       summary.append(versionDivider);
     }
 
+    updatePausedSummary(summary, pausedStatSource, versionDivider);
     updateVersionSummary(summary, versionStatSource);
     versionDivider.hidden = currentVersionCounts.size === 0;
 
@@ -625,7 +686,8 @@
   }
 
   async function loadSummary(type) {
-    const counts = { idle: 0, running: 0 };
+    const counts = { idle: 0, paused: 0, running: 0 };
+    const pausedStates = new Map();
     const statuses = new Map();
     const versionCounts = new Map();
     const versions = new Map();
@@ -639,6 +701,7 @@
         const version = normalizeVersion(runner.version);
         const runnerId = getRunnerId(runner.id);
 
+        pausedStates.set(runnerId, Boolean(runner.paused));
         statuses.set(runnerId, status);
         versions.set(runnerId, version);
         versionCounts.set(version, (versionCounts.get(version) ?? 0) + 1);
@@ -647,6 +710,10 @@
           counts.idle += 1;
         } else if (status === 'RUNNING') {
           counts.running += 1;
+        }
+
+        if (runner.paused) {
+          counts.paused += 1;
         }
       }
 
@@ -657,7 +724,7 @@
       after = runners.pageInfo.endCursor;
     } while (after);
 
-    return { counts, statuses, versionCounts, versions };
+    return { counts, pausedStates, statuses, versionCounts, versions };
   }
 
   async function refreshSummary() {
@@ -668,15 +735,20 @@
     const runnerType = getRunnerType();
     currentRunnerType = runnerType;
     refreshPromise = loadSummary(runnerType)
-      .then(({ counts, statuses, versionCounts, versions }) => {
+      .then(({ counts, pausedStates, statuses, versionCounts, versions }) => {
         if (runnerType === getRunnerType()) {
           currentCounts = counts;
+          currentRunnerPausedStates = pausedStates;
           currentRunnerStatuses = statuses;
           currentVersionCounts = versionCounts;
           currentRunnerVersions = versions;
 
           if (activeVersionFilter && !currentVersionCounts.has(activeVersionFilter)) {
             activeVersionFilter = null;
+          }
+
+          if (activeStatusFilter === 'PAUSED' && currentCounts.paused === 0) {
+            activeStatusFilter = null;
           }
 
           ensureSummary();
@@ -699,7 +771,8 @@
 
   function refreshIfRunnerTypeChanged() {
     if (getRunnerType() !== currentRunnerType) {
-      currentCounts = { idle: null, running: null };
+      currentCounts = { idle: null, paused: null, running: null };
+      currentRunnerPausedStates = new Map();
       currentRunnerStatuses = new Map();
       currentVersionCounts = new Map();
       currentRunnerVersions = new Map();
