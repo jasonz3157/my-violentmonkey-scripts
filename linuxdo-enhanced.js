@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO Enhanced
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.0
+// @version      0.2.1
 // @description  增强 LINUX DO 的话题浏览体验，突出显示楼主，并将打开过的话题标题标记为灰色。
 // @author       jasonz3157
 // @match        https://linux.do/*
@@ -28,7 +28,7 @@
   let scanTimer = 0;
 
   GM_addStyle(`
-    .topic-owner .topic-meta-data .names a[data-user-card] {
+    .topic-post.topic-owner > article > .row > .topic-body > .topic-meta-data .names a[data-user-card] {
       color: ${TOPIC_OWNER_USERNAME_COLOR} !important;
     }
 
