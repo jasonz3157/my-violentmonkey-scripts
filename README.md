@@ -22,7 +22,7 @@
 在 IT之家文章评论区屏蔽反对率大于等于 75% 且反对数大于等于 5 的评论，支持楼中楼评论。
 
 ## `linuxdo-enhanced.js`
-增强 LINUX DO 的话题浏览体验，将楼主用户名标记为红色。
+增强 LINUX DO 的话题浏览体验，将楼主用户名标记为蓝色，并将打开过的话题标题标记为灰色，最近访问记录保存在本地。
 
 ## `duomoyu-hot-list-scrollbar-fix.css`
 修复 duomoyu.com 热榜卡片 hover 时因滚动条出现导致的排版抖动。
