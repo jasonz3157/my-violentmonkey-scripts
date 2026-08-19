@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         IT之家增强
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.0
-// @description  精简 IT之家评论者属地，并隐藏反对率过高且反对数达到阈值的评论，支持楼中楼评论。
+// @version      0.3.0
+// @description  统一 IT之家评论用户名样式、精简评论者属地，并隐藏反对率过高且反对数达到阈值的评论。
 // @author       jasonz3157
 // @match        https://www.ithome.com/*/*/*.htm
 // @icon         https://www.ithome.com/favicon.ico
@@ -31,6 +31,12 @@
   GM_addStyle(`
     .${BLOCKED_CLASS} {
       display: none !important;
+    }
+
+    body:not(.night) #post_comm
+      .info:not(.rmpvip):not(.rmpvipgreen):not(.rmpvipred):not(.rmpvipblue)
+      .nick > a {
+      color: #111 !important;
     }
   `);
 
