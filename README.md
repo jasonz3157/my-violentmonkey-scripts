@@ -18,8 +18,8 @@
 ## `momoyu-keyword-blocker.js`
 在 momoyu.cc 热榜列表中按关键词屏蔽条目，点击屏蔽占位文本可显示原内容，并支持关键词增加、删除、导入、导出。
 
-## `ithome-high-against-comment-blocker.js`
-在 IT之家文章评论区屏蔽反对率大于等于 75% 且反对数大于等于 5 的评论，支持楼中楼评论。
+## `ithome-enhanced.js`
+精简 IT之家文章评论区的评论者属地，并屏蔽反对率大于等于 75% 且反对数大于等于 5 的评论，支持楼中楼评论。
 
 ## `linuxdo-enhanced.js`
 增强 LINUX DO 的话题浏览体验，将楼主用户名标记为蓝色，并将打开过的话题标题标记为灰色，最近访问记录保存在本地。

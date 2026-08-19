@@ -1,16 +1,16 @@
 // ==UserScript==
-// @name         IT之家高反对评论屏蔽
+// @name         IT之家增强
 // @namespace    my-violentmonkey-scripts
-// @version      0.1.0
-// @description  在 IT之家文章评论区隐藏反对率过高且反对数达到阈值的评论，支持楼中楼评论。
+// @version      0.2.0
+// @description  精简 IT之家评论者属地，并隐藏反对率过高且反对数达到阈值的评论，支持楼中楼评论。
 // @author       jasonz3157
 // @match        https://www.ithome.com/*/*/*.htm
 // @icon         https://www.ithome.com/favicon.ico
 // @grant        GM_addStyle
 // @run-at       document-idle
 // @license      GPL-3.0
-// @downloadURL  https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/ithome-high-against-comment-blocker.js
-// @updateURL    https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/ithome-high-against-comment-blocker.js
+// @downloadURL  https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/ithome-enhanced.js
+// @updateURL    https://raw.githubusercontent.com/jasonz3157/my-violentmonkey-scripts/refs/heads/master/ithome-enhanced.js
 // ==/UserScript==
 
 (function () {
@@ -20,6 +20,8 @@
   const MIN_AGAINST_RATE = 0.75;
   const COMMENT_ROOT_SELECTOR = '#post_comm';
   const COMMENT_SELECTOR = 'li.entry, li.gh';
+  const LOCATION_SELECTOR = '.posandtime';
+  const LOCATION_PATTERN = /^(\s*)IT之家(.+?)网友(?=\s|$)/;
   const BLOCKED_CLASS = 'ihacb-blocked';
   const OBSERVER_DEBOUNCE_MS = 120;
 
@@ -69,11 +71,24 @@
     return totalCount > 0 && againstCount >= MIN_AGAINST_COUNT && againstCount / totalCount >= MIN_AGAINST_RATE;
   }
 
+  function simplifyCommentLocations(commentRoot) {
+    commentRoot.querySelectorAll(LOCATION_SELECTOR).forEach((locationElement) => {
+      const originalText = locationElement.textContent;
+      const simplifiedText = originalText.replace(LOCATION_PATTERN, '$1$2');
+
+      if (simplifiedText !== originalText) {
+        locationElement.textContent = simplifiedText;
+      }
+    });
+  }
+
   function scanComments() {
     const commentRoot = document.querySelector(COMMENT_ROOT_SELECTOR);
     if (!commentRoot) {
       return;
     }
+
+    simplifyCommentLocations(commentRoot);
 
     commentRoot.querySelectorAll(COMMENT_SELECTOR).forEach((commentItem) => {
       if (shouldBlockComment(commentItem)) {
