@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab Runner 汇总
 // @namespace    my-violentmonkey-scripts
-// @version      0.4.0
+// @version      0.4.1
 // @description  在 GitLab 管理员 Runner 页面增加作业状态、版本统计及筛选。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -57,7 +57,11 @@
           id
           jobExecutionStatus
           paused
-          version
+          managers(first: 1) {
+            nodes {
+              version
+            }
+          }
         }
         pageInfo {
           endCursor
@@ -698,7 +702,7 @@
 
       for (const runner of runners.nodes ?? []) {
         const status = normalizeJobStatus(runner.jobExecutionStatus);
-        const version = normalizeVersion(runner.version);
+        const version = normalizeVersion(runner.managers?.nodes?.[0]?.version);
         const runnerId = getRunnerId(runner.id);
 
         pausedStates.set(runnerId, Boolean(runner.paused));
