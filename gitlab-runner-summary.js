@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitLab Runner 汇总
 // @namespace    my-violentmonkey-scripts
-// @version      0.4.1
+// @version      0.4.2
 // @description  在 GitLab 管理员 Runner 页面增加作业状态、版本统计及筛选。
 // @author       jasonz3157
 // @icon         https://about.gitlab.com/images/ico/favicon.ico
@@ -31,16 +31,16 @@
   const SUMMARY_ID = 'vm-runner-job-status-summary';
   const DIVIDER_ID = 'vm-runner-job-status-divider';
   const VERSION_DIVIDER_ID = 'vm-runner-version-divider';
+  const ACTIVE_STAT_ID = 'vm-runner-job-status-active';
   const IDLE_STAT_ID = 'vm-runner-job-status-idle';
   const PAUSED_STAT_ID = 'vm-runner-status-paused';
-  const RUNNING_STAT_ID = 'vm-runner-job-status-running';
   const VERSION_STAT_CLASS = 'vm-runner-version-stat';
   const UNKNOWN_VERSION = 'Unknown';
   const RUNNER_TYPES = new Set(['INSTANCE_TYPE', 'GROUP_TYPE', 'PROJECT_TYPE']);
   const STATUS_LABELS = {
+    ACTIVE: 'Active',
     IDLE: 'Idle',
     PAUSED: 'Paused',
-    RUNNING: 'Running',
   };
   const VERSION_COLLATOR = new Intl.Collator(undefined, {
     numeric: true,
@@ -71,7 +71,7 @@
     }
   `;
 
-  let currentCounts = { idle: null, paused: null, running: null };
+  let currentCounts = { active: null, idle: null, paused: null };
   let currentRunnerPausedStates = new Map();
   let currentRunnerStatuses = new Map();
   let currentVersionCounts = new Map();
@@ -102,8 +102,8 @@
         color: var(--gl-text-color-disabled, #737278) !important;
       }
 
-      #${RUNNING_STAT_ID} [data-testid="meta-icon"],
-      #${RUNNING_STAT_ID} .vm-runner-job-status-icon {
+      #${ACTIVE_STAT_ID} [data-testid="meta-icon"],
+      #${ACTIVE_STAT_ID} .vm-runner-job-status-icon {
         color: var(--gl-status-info-icon-color, #1f75cb) !important;
       }
 
@@ -146,7 +146,7 @@
         display: none !important;
       }
 
-      .vm-runner-job-badge.vm-runner-running-badge {
+      .vm-runner-job-badge.vm-runner-active-badge {
         background-color: var(--gl-status-info-background-color, #cbe2f9) !important;
         color: var(--gl-status-info-text-color, #0b5cad) !important;
       }
@@ -225,7 +225,7 @@
     }
 
     if (['ACTIVE', 'RUNNING'].includes(normalizedStatus)) {
-      return 'RUNNING';
+      return 'ACTIVE';
     }
 
     return null;
@@ -292,20 +292,21 @@
   function updateRowStatusBadges(row) {
     const onlineBadge = getRowStatusBadge(row, 'ONLINE');
     const idleBadge = getRowStatusBadge(row, 'IDLE');
-    const runningBadge = getRowStatusBadge(row, 'RUNNING');
+    const activeBadge =
+      getRowStatusBadge(row, 'ACTIVE') ?? getRowStatusBadge(row, 'RUNNING');
 
     if (onlineBadge) {
       onlineBadge.classList.remove(
         'vm-runner-job-badge',
+        'vm-runner-active-badge',
         'vm-runner-idle-badge',
-        'vm-runner-running-badge',
       );
       onlineBadge.classList.add('gl-badge-outlined', 'vm-runner-online-badge');
     }
 
     for (const [badge, statusClass] of [
       [idleBadge, 'vm-runner-idle-badge'],
-      [runningBadge, 'vm-runner-running-badge'],
+      [activeBadge, 'vm-runner-active-badge'],
     ]) {
       if (!badge) {
         continue;
@@ -313,16 +314,20 @@
 
       badge.classList.remove(
         'gl-badge-outlined',
+        '!gl-bg-transparent',
         'gl-bg-transparent',
         'gl-bg-transparent!',
         'gl-border',
+        'gl-border-blue-600!',
         'gl-border-gray-500',
         'gl-border-gray-500!',
+        'gl-shadow-inner-1-gray-400',
+        'gl-text-blue-600!',
         'gl-text-gray-700',
         'gl-text-gray-700!',
         'vm-runner-online-badge',
         statusClass === 'vm-runner-idle-badge'
-          ? 'vm-runner-running-badge'
+          ? 'vm-runner-active-badge'
           : 'vm-runner-idle-badge',
       );
       badge.classList.add('vm-runner-job-badge', statusClass);
@@ -556,11 +561,11 @@
 
   function updateRenderedCounts() {
     const idleStat = document.getElementById(IDLE_STAT_ID);
-    const runningStat = document.getElementById(RUNNING_STAT_ID);
+    const activeStat = document.getElementById(ACTIVE_STAT_ID);
     const pausedStat = document.getElementById(PAUSED_STAT_ID);
 
     setTextIfChanged(getValueElement(idleStat), formatCount(currentCounts.idle));
-    setTextIfChanged(getValueElement(runningStat), formatCount(currentCounts.running));
+    setTextIfChanged(getValueElement(activeStat), formatCount(currentCounts.active));
     setTextIfChanged(getValueElement(pausedStat), formatCount(currentCounts.paused));
   }
 
@@ -591,11 +596,11 @@
       summary.append(
         createStat(
           onlineStat ?? builtInStats[0],
-          RUNNING_STAT_ID,
-          'Running',
-          currentCounts.running,
+          ACTIVE_STAT_ID,
+          'Active',
+          currentCounts.active,
           'status-active',
-          'RUNNING',
+          'ACTIVE',
         ),
         createStat(
           offlineStat ?? builtInStats[0],
@@ -690,7 +695,7 @@
   }
 
   async function loadSummary(type) {
-    const counts = { idle: 0, paused: 0, running: 0 };
+    const counts = { active: 0, idle: 0, paused: 0 };
     const pausedStates = new Map();
     const statuses = new Map();
     const versionCounts = new Map();
@@ -712,8 +717,8 @@
 
         if (status === 'IDLE') {
           counts.idle += 1;
-        } else if (status === 'RUNNING') {
-          counts.running += 1;
+        } else if (status === 'ACTIVE') {
+          counts.active += 1;
         }
 
         if (runner.paused) {
@@ -775,7 +780,7 @@
 
   function refreshIfRunnerTypeChanged() {
     if (getRunnerType() !== currentRunnerType) {
-      currentCounts = { idle: null, paused: null, running: null };
+      currentCounts = { active: null, idle: null, paused: null };
       currentRunnerPausedStates = new Map();
       currentRunnerStatuses = new Map();
       currentVersionCounts = new Map();
