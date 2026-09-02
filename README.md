@@ -24,6 +24,9 @@
 ## `linuxdo-enhanced.js`
 增强 LINUX DO 的话题浏览体验，将楼主用户名标记为蓝色，并将打开过的话题标题标记为灰色，最近访问记录保存在本地。
 
+## `v2ex-visited-topics.js`
+在 V2EX 列表中将打开过的主题标记为灰色，最近访问记录保存在本地，并滚动保留最多 5000 条。
+
 ## `duomoyu-hot-list-scrollbar-fix.css`
 修复 duomoyu.com 热榜卡片 hover 时因滚动条出现导致的排版抖动。
 
