@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LINUX DO Enhanced
 // @namespace    my-violentmonkey-scripts
-// @version      0.2.1
+// @version      0.2.2
 // @description  增强 LINUX DO 的话题浏览体验，突出显示楼主，并将打开过的话题标题标记为灰色。
 // @author       jasonz3157
 // @match        https://linux.do/*
@@ -17,6 +17,10 @@
   'use strict';
 
   const TOPIC_OWNER_USERNAME_COLOR = '#00aeff';
+  const TOPIC_OWNER_USERNAME_CLASS = 'linuxdo-enhanced-topic-owner-username';
+  const TOPIC_OWNER_LINK_SELECTOR =
+    '.topic-post.topic-owner > article > .row > .topic-body > .topic-meta-data .names a[data-user-card]';
+  const POST_USERNAME_LINK_SELECTOR = '.topic-meta-data .names a[data-user-card]';
   const VISITED_TOPIC_TITLE_COLOR = '#919191';
   const VISITED_TOPIC_CLASS = 'linuxdo-enhanced-visited-topic';
   const VISITED_TOPIC_STORAGE_KEY = 'linuxdo-enhanced.visited-topic-ids.v1';
@@ -28,7 +32,8 @@
   let scanTimer = 0;
 
   GM_addStyle(`
-    .topic-post.topic-owner > article > .row > .topic-body > .topic-meta-data .names a[data-user-card] {
+    ${TOPIC_OWNER_LINK_SELECTOR},
+    .${TOPIC_OWNER_USERNAME_CLASS} {
       color: ${TOPIC_OWNER_USERNAME_COLOR} !important;
     }
 
@@ -96,6 +101,17 @@
     rememberTopic(getTopicId(location.href));
   }
 
+  function markTopicOwnerUsernameLinks() {
+    const topicOwnerUsername = document.querySelector(TOPIC_OWNER_LINK_SELECTOR)?.dataset.userCard;
+
+    document.querySelectorAll(POST_USERNAME_LINK_SELECTOR).forEach((usernameLink) => {
+      const isTopicOwner = Boolean(
+        topicOwnerUsername && usernameLink.dataset.userCard === topicOwnerUsername,
+      );
+      usernameLink.classList.toggle(TOPIC_OWNER_USERNAME_CLASS, isTopicOwner);
+    });
+  }
+
   function markTopicLink(topicLink) {
     const topicId = getTopicId(topicLink.href);
     topicLink.classList.toggle(VISITED_TOPIC_CLASS, Boolean(topicId && visitedTopicIds.has(topicId)));
@@ -111,6 +127,7 @@
 
   function scan() {
     rememberCurrentTopic();
+    markTopicOwnerUsernameLinks();
     scanTopicLinks();
   }
 
